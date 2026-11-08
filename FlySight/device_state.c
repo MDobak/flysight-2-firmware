@@ -31,8 +31,7 @@
 #include "custom_stm.h"
 #include "ble_tx_queue.h"
 #include "mode.h"
-#include "alt_ref.h"
-#include "config.h"
+#include "device_state_ext.h"
 #include "version.h"    // For GIT_TAG
 #include "state.h"      // For FS_State_Get()->device_id
 #include "dbg_trace.h"
@@ -50,12 +49,7 @@
 #define DS_CMD_REQUEST_START   0x12 // Payload: (none)
 #define DS_CMD_REQUEST_CONFIG  0x13 // Payload: (none)
 #define DS_CMD_REQUEST_PAIRING 0x14 // Payload: (none)
-#define DS_CMD_REQUEST_SENSOR  0x15 // Payload: (none)
-
-#define DS_CMD_SET_ALT_ZERO    0x16 // Payload: (none). Active or sensor mode only.
-                                    // Response Data: see alt_zero_response()
-#define DS_CMD_GET_ALT_ZERO    0x17 // Payload: (none)
-                                    // Response Data: see alt_zero_response()
+#define DS_CMD_REQUEST_SENSOR  0x15 // Payload: (none). Fork, see device_state_ext.h
 
 #define DS_RESPONSE_FALLBACK_MSEC 200
 #define DS_RESPONSE_FALLBACK_TICKS (DS_RESPONSE_FALLBACK_MSEC*1000/CFG_TS_TICK_VAL)
@@ -103,7 +97,6 @@ static void send_response(uint8_t received_cmd_opcode, uint8_t status,
                           const uint8_t *response_data,
                           uint8_t response_data_len,
                           BLE_TX_Queue_callback_t callback);
-static uint8_t alt_zero_response(uint8_t set, uint8_t *buf);
 
 void DeviceState_Init(void) {
     HW_TS_Create(CFG_TIM_PROC_ID_ISR, &response_timer_id,
@@ -220,29 +213,10 @@ void DeviceState_Handle_DS_ControlPointWrite(const uint8_t *payload, uint8_t len
                 }
                 break;
 
-            case DS_CMD_SET_ALT_ZERO:
-                if (params_len != 0) {
-                    status = CP_STATUS_INVALID_PARAMETER;
-                } else if ((FS_Mode_State() != FS_MODE_STATE_ACTIVE) &&
-                           (FS_Mode_State() != FS_MODE_STATE_SENSOR)) {
-                    status = CP_STATUS_OPERATION_NOT_PERMITTED;
-                } else {
-                    response_data_len = alt_zero_response(FS_AltRef_SetZero(), response_data_buf);
-                    status = CP_STATUS_SUCCESS;
-                }
-                break;
-
-            case DS_CMD_GET_ALT_ZERO:
-                if (params_len != 0) {
-                    status = CP_STATUS_INVALID_PARAMETER;
-                } else {
-                    response_data_len = alt_zero_response(0, response_data_buf);
-                    status = CP_STATUS_SUCCESS;
-                }
-                break;
-
             default:
-                status = CP_STATUS_CMD_NOT_SUPPORTED;
+                // Fork: the commands of device_state_ext.c
+                status = DeviceStateExt_Handle(received_cmd_opcode, &payload[1], params_len,
+                                               response_data_buf, &response_data_len);
                 break;
         }
     }
@@ -488,34 +462,4 @@ static void send_response(uint8_t received_cmd_opcode, uint8_t status,
                               total_response_len,
                               &SizeDs_Control_Point,
                               callback);
-}
-
-static void put_i32(uint8_t *buf, int32_t value)
-{
-    uint32_t v = (uint32_t)value;
-    buf[0] = (uint8_t)v;
-    buf[1] = (uint8_t)(v >> 8);
-    buf[2] = (uint8_t)(v >> 16);
-    buf[3] = (uint8_t)(v >> 24);
-}
-
-/* Response data for the altitude zero commands (12 bytes, little-endian):
- *   [0]     Parts set by this command (FS_ALT_REF_GNSS | FS_ALT_REF_BARO)
- *   [1]     Zero flags (FS_ALT_REF_GNSS | FS_ALT_REF_BARO | FS_ALT_REF_AUTO)
- *   [2..5]  GNSS ground level (mm above sea level)
- *   [6..9]  Ground pressure (Pa * 100)
- *   [10]    Alt_Source of the last configuration read
- *   [11]    Alt_Zero of the last configuration read
- */
-static uint8_t alt_zero_response(uint8_t set, uint8_t *buf)
-{
-    const FS_AltRef_Zero_t *zero = FS_AltRef_GetZero();
-
-    buf[0] = set;
-    buf[1] = zero->flags;
-    put_i32(&buf[2], zero->ground_hmsl);
-    put_i32(&buf[6], zero->ground_pressure);
-    buf[10] = FS_Config_Get()->alt_source;
-    buf[11] = FS_Config_Get()->alt_zero;
-    return 12;
 }

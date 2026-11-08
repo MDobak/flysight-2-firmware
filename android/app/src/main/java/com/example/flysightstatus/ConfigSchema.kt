@@ -517,9 +517,9 @@ object ConfigSchema {
             Number("Bearing", "Bearing", 0, 0..360, "For Direction to bearing.", display = { DEGREES }).more(
                 "A compass direction from 0° to 360°. With Direction to bearing, the tone tells you the difference " +
                     "between your course and this direction."),
-            Number("End_Nav", "Stop navigation below", 0, help = "GPS height above the ground level. 0 = no limit.", display = { METRES }).more(
+            Number("End_Nav", "Stop navigation below", 0, help = "GPS height above the Ground elevation. 0 = no limit.", display = { METRES }).more(
                 "Below this height, there is no navigation tone or speech. The height always comes from the GPS, " +
-                    "above the GPS ground level, or else above the Ground elevation."),
+                    "above the Ground elevation (DZ_Elev). The ground level that you set in the app is not used here."),
             Number("Max_Dist", "Maximum distance", 10000, 0..10000, "No navigation tone farther from the target. 0 = no limit.",
                 display = { METRES }),
             Number("Min_Angle", "Minimum angle", 5, 0..360, "A smaller difference in direction counts as on course.",

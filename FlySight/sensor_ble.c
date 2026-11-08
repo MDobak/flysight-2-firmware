@@ -26,15 +26,21 @@
 #include "main.h"
 #include "app_common.h"
 #include "baro.h"
+#include "ble_tx_queue.h"
+#include "custom_stm.h"
 #include "hum.h"
 #include "imu.h"
 #include "mag.h"
+#include "mode.h"
 #include "sensor_ble.h"
 #include "sensor_time.h"
 #include "stm32_seq.h"
 #include "vbat.h"
 
+extern uint8_t SizeSd_Sensor_Measurement; // From custom_stm.c
+
 static volatile bool s_enabled = false;
+static uint8_t s_packet[SENSOR_BLE_MAX_LEN];
 static volatile uint64_t s_last_packet = 0;
 
 /* Time of the last value that was sent for each sensor */
@@ -43,6 +49,37 @@ static uint64_t s_sent_hum;
 static uint64_t s_sent_mag;
 static uint64_t s_sent_imu;
 static uint64_t s_sent_vbat;
+
+static void Sensor_BLE_Task(void)
+{
+    uint8_t length;
+
+    if (!s_enabled) return;
+
+    length = Sensor_BLE_Build(s_packet);
+    if (length > 1)
+    {
+        BLE_TX_Queue_SendTxPacket(CUSTOM_STM_SD_SENSOR_MEASUREMENT,
+            s_packet, length, &SizeSd_Sensor_Measurement, 0);
+    }
+}
+
+void Sensor_BLE_Init(void)
+{
+    s_enabled = false;
+    UTIL_SEQ_RegTask(1 << CFG_TASK_FS_SENSOR_BLE_ID, UTIL_SEQ_RFU, Sensor_BLE_Task);
+}
+
+void Sensor_BLE_OnDisconnect(void)
+{
+    s_enabled = false;
+
+    // Sensor mode is only for a connected client
+    if (FS_Mode_State() == FS_MODE_STATE_SENSOR)
+    {
+        FS_Mode_PushQueue(FS_MODE_EVENT_EXT_STOP);
+    }
+}
 
 void Sensor_BLE_SetEnabled(bool enabled)
 {

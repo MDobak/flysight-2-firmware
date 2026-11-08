@@ -25,12 +25,13 @@
 #include <stdbool.h>
 
 #include "main.h"
-#include "alt_ref.h"
 #include "app_common.h"
 #include "audio.h"
 #include "audio_control.h"
 #include "common.h"
 #include "config.h"
+#include "config_ext.h"
+#include "alt_ref.h"
 #include "nav.h"
 #include "stm32_seq.h"
 
@@ -41,13 +42,12 @@
 
 #define INVALID_VALUE   INT32_MAX
 
-
 #define FLAG_HAS_FIX         0x01
 #define FLAG_FIRST_FIX       0x02
 #define FLAG_BEEP_DONE       0x04
 #define FLAG_SAY_ALTITUDE    0x08
 #define FLAG_VERTICAL_ACC    0x10
-#define FLAG_HAS_ALT         0x20 // altHeight is valid (GNSS fix, or barometer)
+#define FLAG_HAS_ALT         0x20 // Fork: the Alt_Source height is valid
 
 #define TONE_MIN_PITCH 220
 #define TONE_MAX_PITCH 1760
@@ -68,21 +68,12 @@ static uint16_t sp_counter;
 static uint8_t flags;
 static uint8_t prev_flags;
 
-static int32_t prevHeight;
+static int32_t prevHMSL;
 
-// Heights above the ground level (mm), from alt_ref:
-//   altHeight  - from Alt_Source (GNSS or barometer). Only for the altitude
-//                callouts: alarms, alarm windows, silence windows, and
-//                altitude calls.
-//   gnssHeight - always from the GNSS. For End_Nav.
-// The speeds, the tones, the airspeed correction and the log use the GNSS.
-static int32_t altHeight;
-static int32_t gnssHeight;
-
-// The kind of altHeight and the alt_ref zero epoch. When this changes, the
-// change of altHeight is not a real movement, and no alarm plays.
-static uint32_t altKey;
-static uint32_t prevAltKey;
+// Fork: the altitude callouts use Alt_Source. See getAltData().
+static int32_t altHMSL;
+static uint32_t altKey, prevAltKey;
+static const FS_GNSS_Data_t *gnssSource;
 
 static uint8_t g_suppress_tone;
 
@@ -238,6 +229,18 @@ static void getValues(
 		}
 	}
 
+	// If navigation is disabled and the requested mode is a
+	// navigation-related feature, mark it as invalid
+	if (!config->enable_nav &&
+	    (mode == FS_CONFIG_MODE_DIRECTION_TO_DESTINATION ||
+	     mode == FS_CONFIG_MODE_DISTANCE_TO_DESTINATION ||
+	     mode == FS_CONFIG_MODE_DIRECTION_TO_BEARING ||
+	     mode == FS_CONFIG_MODE_LEFT_RIGHT))
+	{
+		*val = INVALID_VALUE;
+		return;
+	}
+
 	switch (mode)
 	{
 	case FS_CONFIG_MODE_HORIZONTAL_SPEED:
@@ -270,7 +273,7 @@ static void getValues(
 		if ((calcDistance(current->lat,current->lon,config->lat,config->lon) < config->max_dist) || (config->max_dist == 0))
 		{
 			//check if above height tone should be silenced
-			if ((gnssHeight > config->end_nav) || (config->end_nav == 0))
+			if ((current->hMSL > (config->end_nav+config->dz_elev)) || (config->end_nav == 0))
 			{
 				tVal=calcDirection(current->lat,current->lon,config->lat,config->lon,current->heading);
 				//check if heading not within UBX_min_angle deg of bearing or tones needed for other measurement
@@ -313,7 +316,7 @@ static void getValues(
 		break;
 	case FS_CONFIG_MODE_DIRECTION_TO_BEARING: // Direction to bearing
 		//check if above height tone should be silenced
-		if ((gnssHeight > config->end_nav) || (config->end_nav == 0))
+		if ((current->hMSL > (config->end_nav+config->dz_elev)) || (config->end_nav == 0))
 		{
 			tVal=calcRelBearing(config->bearing,current->heading/100000);
 			//check if heading not within UBX_min_angle deg of bearing or tones needed for other measurement
@@ -338,7 +341,7 @@ static void getValues(
 		if ((calcDistance(current->lat,current->lon,config->lat,config->lon) < config->max_dist) || (config->max_dist == 0))
 		{
 			//check if above height tone should be silenced
-			if ((gnssHeight > config->end_nav) || (config->end_nav == 0))
+			if ((current->hMSL > (config->end_nav+config->dz_elev)) || (config->end_nav == 0))
 			{
 				tVal=calcDirection(current->lat,current->lon,config->lat,config->lon,current->heading);
 				*min = 0;
@@ -423,16 +426,17 @@ static char *numberToSpeech(
     return ptr;
 }
 
-// Speak an altitude in meters or feet. Full format: the number in words and
-// the unit. Short format: from 1000, the digits of the hundreds with no unit
-// ("2 5" is 2500). Below 1000, or not at a full hundred, the full format.
+// Fork: speak an altitude in meters or feet. Full format: the number in
+// words and the unit. Short format (Alt_Format): from 1000, the digits of
+// the hundreds with no unit ("2 5" is 2500). Below 1000, or not at a full
+// hundred, the full format.
 static char *altitudeToSpeech(
 	int32_t value,
 	uint8_t units,
-	uint8_t format,
 	char *ptr)
 {
-	if ((format == FS_CONFIG_ALT_FORMAT_SHORT) && (value >= 1000) && (value % 100 == 0))
+	if ((FS_ConfigExt_Get()->alt_format == FS_CONFIG_ALT_FORMAT_SHORT) &&
+	    (value >= 1000) && (value % 100 == 0))
 	{
 		char digits[12];
 		char *d = digits + sizeof(digits);
@@ -487,6 +491,17 @@ static void speakValue(
 			uint16_t y2 = sas_table[i + 1];
 			speed_mul = y1 + ((y2 - y1) * j) / 1024;
 		}
+	}
+
+	// If navigation is disabled and the requested mode is a
+	// navigation-related feature, mark it as invalid
+	if (!config->enable_nav &&
+	   (config->speech[cur_speech].mode == FS_CONFIG_MODE_DIRECTION_TO_DESTINATION ||
+	    config->speech[cur_speech].mode == FS_CONFIG_MODE_DISTANCE_TO_DESTINATION ||
+	    config->speech[cur_speech].mode == FS_CONFIG_MODE_DIRECTION_TO_BEARING ||
+	    config->speech[cur_speech].mode == FS_CONFIG_MODE_LEFT_RIGHT))
+	{
+		return;
 	}
 
 	switch (config->speech[cur_speech].units)
@@ -545,7 +560,7 @@ static void speakValue(
 		if ((calcDistance(current->lat,current->lon,config->lat,config->lon) < config->max_dist) || (config->max_dist == 0))
 		{
 			//check if above height tone should be silenced
-			if ((gnssHeight > config->end_nav) || (config->end_nav == 0))
+			if ((current->hMSL > (config->end_nav+config->dz_elev)) || (config->end_nav == 0))
 			{
 				config->speech[cur_speech].decimals = 0;
 				tVal = calcDirection(current->lat,current->lon,config->lat,config->lon,current->heading);
@@ -573,7 +588,7 @@ static void speakValue(
 		break;
 	case FS_CONFIG_MODE_DIRECTION_TO_BEARING:
 		//check if above height tone should be silenced
-		if ((gnssHeight > config->end_nav) || (config->end_nav == 0))
+		if ((current->hMSL > (config->end_nav+config->dz_elev)) || (config->end_nav == 0))
 		{
 			config->speech[cur_speech].decimals = 0;
 			tVal = calcRelBearing(config->bearing,current->heading/100000);
@@ -592,10 +607,9 @@ static void speakValue(
 		{
 			step_size = 3048 * config->speech[cur_speech].decimals;
 		}
-		step = (altHeight * 10 + step_size / 2) / step_size;
+		step = ((altHMSL - config->dz_elev) * 10 + step_size / 2) / step_size;
 		speech_ptr = speech_buf + 2;
-		speech_ptr = altitudeToSpeech(step * config->speech[cur_speech].decimals,
-				config->speech[cur_speech].units, config->alt_format, speech_ptr);
+		speech_ptr = altitudeToSpeech(step * config->speech[cur_speech].decimals, config->speech[cur_speech].units, speech_ptr);
 		end_ptr = speech_ptr;
 		speech_ptr = speech_buf + 2;
 		break;
@@ -647,7 +661,7 @@ static void speakValue(
 		}
 		break;
 	case FS_CONFIG_MODE_ALTITUDE:
-		// altitudeToSpeech adds the unit
+		// Fork: altitudeToSpeech adds the unit
 		break;
 	}
 
@@ -663,7 +677,7 @@ static void updateAlarms(
 	const int32_t velD = current->velD / 10;
 
 	uint8_t i, suppress_tone, suppress_alt;
-	int32_t step_size, step = 0, step_elev = 0;
+	int32_t step_size, step, step_elev;
 
 	char filename[13];
 
@@ -672,10 +686,10 @@ static void updateAlarms(
 
 	for (i = 0; i < config->num_alarms; ++i)
 	{
-		const int32_t alarm_elev = config->alarms[i].elev;
+		const int32_t alarm_elev = config->alarms[i].elev + config->dz_elev;
 
-		if ((altHeight <= alarm_elev + config->alarm_window_above) &&
-		    (altHeight >= alarm_elev - config->alarm_window_below))
+		if ((current->hMSL <= alarm_elev + config->alarm_window_above) &&
+		    (current->hMSL >= alarm_elev - config->alarm_window_below))
 		{
 			suppress_tone = 1;
 			break;
@@ -684,8 +698,8 @@ static void updateAlarms(
 
 	for (i = 0; i < config->num_windows; ++i)
 	{
-		if ((config->windows[i].bottom <= altHeight) &&
-		    (config->windows[i].top >= altHeight))
+		if ((config->windows[i].bottom + config->dz_elev <= current->hMSL) &&
+		    (config->windows[i].top + config->dz_elev >= current->hMSL))
 		{
 			suppress_tone = 1;
 			suppress_alt = 1;
@@ -704,13 +718,12 @@ static void updateAlarms(
 			step_size = 3048 * config->alt_step;
 		}
 
-		step = (altHeight * 10 + step_size / 2) / step_size;
-		step_elev = step * step_size / 10;
+		step = ((current->hMSL - config->dz_elev) * 10 + step_size / 2) / step_size;
+		step_elev = step * step_size / 10 + config->dz_elev;
 
-		// Step 0 is the ground. There is no altitude call at the ground.
-		if ((step > 0) &&
-		    (altHeight <= step_elev + config->alarm_window_above) &&
-		    (altHeight >= step_elev - config->alarm_window_below))
+		if ((current->hMSL <= step_elev + config->alarm_window_above) &&
+		    (current->hMSL >= step_elev - config->alarm_window_below) &&
+		    (step > 0))
 		{
 			suppress_tone = 1;
 		}
@@ -727,12 +740,12 @@ static void updateAlarms(
 
 	if ((prev_flags & FLAG_HAS_ALT) && (altKey == prevAltKey))
 	{
-		int32_t min = MIN(prevHeight, altHeight);
-		int32_t max = MAX(prevHeight, altHeight);
+		int32_t min = MIN(prevHMSL, current->hMSL);
+		int32_t max = MAX(prevHMSL, current->hMSL);
 
 		for (i = 0; i < config->num_alarms; ++i)
 		{
-			const int32_t alarm_elev = config->alarms[i].elev;
+			const int32_t alarm_elev = config->alarms[i].elev + config->dz_elev;
 
 			if (alarm_elev >= min && alarm_elev < max)
 			{
@@ -772,68 +785,11 @@ static void updateAlarms(
 			    current->gSpeed >= config->hThreshold)
 			{
 				speech_ptr = speech_buf;
-				speech_ptr = altitudeToSpeech(step * config->alt_step,
-						config->alt_units, config->alt_format, speech_ptr);
+				speech_ptr = altitudeToSpeech(step * config->alt_step, config->alt_units, speech_ptr);
 				*(speech_ptr++) = '\0';
 				speech_ptr = speech_buf;
 			}
 		}
-	}
-}
-
-// Speak the next value in the speech list. With altitudeOnly, skip the
-// values that need GNSS speeds (no GNSS fix, barometer altitude).
-static void speakNext(
-	FS_Config_Data_t *config,
-	FS_GNSS_Data_t *current,
-	bool altitudeOnly)
-{
-	uint8_t i;
-
-	if (config->sp_rate != 0 &&
-	    config->num_speech != 0 &&
-	    sp_counter >= config->sp_rate &&
-		(*speech_ptr == 0) &&
-		!(flags & FLAG_SAY_ALTITUDE))
-	{
-		for (i = 0; i < config->num_speech; ++i)
-		{
-			const bool isAltitude =
-				(config->speech[cur_speech].mode == FS_CONFIG_MODE_ALTITUDE);
-
-			if (isAltitude || !altitudeOnly)
-			{
-				speakValue(config, current);
-				cur_speech = (cur_speech + 1) % config->num_speech;
-				break;
-			}
-			else
-			{
-				cur_speech = (cur_speech + 1) % config->num_speech;
-			}
-		}
-
-		sp_counter = 0;
-	}
-}
-
-// The speech list without a GNSS fix. Only the barometer altitude is
-// available. V_Thresh uses the barometer vertical speed, and H_Thresh is
-// not used. The tone stays off.
-static void updateBaroSpeech(
-	FS_Config_Data_t *config,
-	FS_GNSS_Data_t *current)
-{
-	const int32_t velD = current->velD / 10;
-
-	if (!g_suppress_tone && (ABS(velD) >= config->threshold))
-	{
-		speakNext(config, current, true);
-	}
-
-	if (sp_counter < config->sp_rate)
-	{
-		sp_counter += config->rate;
 	}
 }
 
@@ -847,6 +803,8 @@ static void updateTones(
 
 	int32_t val_1 = INVALID_VALUE, min_1 = config->min, max_1 = config->max;
 	int32_t val_2 = INVALID_VALUE, min_2 = config->min_2, max_2 = config->max_2;
+
+	uint8_t i;
 
 	getValues(current, config, config->mode, &val_1, &min_1, &max_1);
 
@@ -914,7 +872,29 @@ static void updateTones(
 		{
 			setTone(config, val_1, min_1, max_1, val_2, min_2, max_2);
 
-			speakNext(config, current, false);
+			if (config->sp_rate != 0 &&
+			    config->num_speech != 0 &&
+			    sp_counter >= config->sp_rate &&
+				(*speech_ptr == 0) &&
+				!(flags & FLAG_SAY_ALTITUDE))
+			{
+				for (i = 0; i < config->num_speech; ++i)
+				{
+					if ((config->speech[cur_speech].mode != FS_CONFIG_MODE_ALTITUDE) ||
+						(flags & FLAG_HAS_ALT))
+					{
+						speakValue(config, current);
+						cur_speech = (cur_speech + 1) % config->num_speech;
+						break;
+					}
+					else
+					{
+						cur_speech = (cur_speech + 1) % config->num_speech;
+					}
+				}
+
+				sp_counter = 0;
+			}
 		}
 		else
 		{
@@ -928,54 +908,104 @@ static void updateTones(
 	}
 }
 
+// Fork: the data for the altitude callouts (alarms, alarm windows, silence
+// windows, altitude calls and the spoken altitude). It is a copy of the GNSS
+// data. hMSL is the height from Alt_Source above the ground level, plus
+// DZ_Elev, so the upstream code (hMSL - dz_elev) gets the correct height.
+// Without a GNSS fix, the barometer gives velD, and H_Thresh is not used.
+// Returns true if the height is valid.
+static bool getAltData(
+	const FS_Config_Data_t *config,
+	const FS_GNSS_Data_t *current,
+	FS_GNSS_Data_t *alt,
+	bool *baro)
+{
+	uint8_t kind;
+	const int32_t height = FS_AltRef_Height(current,
+			FS_ConfigExt_Get()->alt_source, config->dz_elev, &kind);
+
+	*alt = *current;
+	alt->hMSL = height + config->dz_elev;
+
+	// A new ground level is not a real movement. Then no alarm plays.
+	altKey = (FS_AltRef_Epoch() << 2) | kind;
+	*baro = (kind == FS_ALT_REF_KIND_BARO);
+
+	if ((current->gpsFix != 3) && *baro)
+	{
+		alt->velD = FS_AltRef_BaroVelD();
+		alt->gSpeed = INT32_MAX;
+	}
+
+	return (current->gpsFix == 3) || *baro;
+}
+
+// Fork: the speech list without a GNSS fix. Only the barometer altitude is
+// available. The tone stays off.
+static void updateBaroSpeech(
+	FS_Config_Data_t *config,
+	FS_GNSS_Data_t *alt)
+{
+	const int32_t velD = alt->velD / 10;
+	uint8_t i;
+
+	if (!g_suppress_tone &&
+	    ABS(velD) >= config->threshold &&
+	    config->sp_rate != 0 &&
+	    config->num_speech != 0 &&
+	    sp_counter >= config->sp_rate &&
+		(*speech_ptr == 0) &&
+		!(flags & FLAG_SAY_ALTITUDE))
+	{
+		for (i = 0; i < config->num_speech; ++i)
+		{
+			const bool isAltitude =
+				(config->speech[cur_speech].mode == FS_CONFIG_MODE_ALTITUDE);
+
+			if (isAltitude)
+			{
+				speakValue(config, alt);
+			}
+			cur_speech = (cur_speech + 1) % config->num_speech;
+			if (isAltitude) break;
+		}
+
+		sp_counter = 0;
+	}
+
+	if (sp_counter < config->sp_rate)
+	{
+		sp_counter += config->rate;
+	}
+}
+
 static void producerTask(void)
 {
 	FS_Config_Data_t config;
 	FS_GNSS_Data_t current;
+	FS_GNSS_Data_t alt;
+	bool baro;
 
 	// Copy to local variable
 	memcpy(&config, FS_Config_Get(), sizeof(FS_Config_Data_t));
-	memcpy(&current, FS_GNSS_GetData(), sizeof(FS_GNSS_Data_t));
+	memcpy(&current, gnssSource, sizeof(FS_GNSS_Data_t));
 
-	// Heights above the ground level. Only the altitude callouts use
-	// Alt_Source. Everything else uses the GNSS.
-	uint8_t kind;
-	altHeight = FS_AltRef_Height(&current, config.alt_source, config.dz_elev, &kind);
-	gnssHeight = FS_AltRef_Height(&current, 0, config.dz_elev, NULL);
-	altKey = (FS_AltRef_Epoch() << 2) | kind;
-
-	// With the barometer, the altitude callouts work without a GNSS fix
-	const uint8_t hasFix = (current.gpsFix == 3);
-	const uint8_t baroAlt = (kind == FS_ALT_REF_KIND_BARO);
-
-	if (hasFix || baroAlt)
+	// Fork: the altitude callouts use Alt_Source
+	if (getAltData(&config, &current, &alt, &baro))
 	{
 		flags |= FLAG_HAS_ALT;
-
-		if (hasFix)
-		{
-			updateAlarms(&config, &current);
-		}
-		else
-		{
-			// No GNSS speeds. The barometer gives the vertical speed for
-			// V_Thresh, and H_Thresh is not used.
-			FS_GNSS_Data_t baroData = current;
-			baroData.velD = FS_AltRef_BaroVelD();
-			baroData.gSpeed = INT32_MAX;
-			updateAlarms(&config, &baroData);
-			updateBaroSpeech(&config, &baroData);
-		}
 	}
 	else
 	{
 		flags &= ~FLAG_HAS_ALT;
 	}
+	altHMSL = alt.hMSL;
 
-	if (hasFix)
+	if (current.gpsFix == 3)
 	{
 		flags |= FLAG_HAS_FIX;
 
+		updateAlarms(&config, &alt);
 		updateTones(&config, &current);
 
 		if (!(flags & FLAG_BEEP_DONE))
@@ -987,9 +1017,16 @@ static void producerTask(void)
 	{
 		flags &= ~FLAG_HAS_FIX;
 		setRate(0);
+
+		// Fork: with the barometer, the callouts work without a fix
+		if (flags & FLAG_HAS_ALT)
+		{
+			updateAlarms(&config, &alt);
+			updateBaroSpeech(&config, &alt);
+		}
 	}
 
-	if ((current.vAcc < 10000) || baroAlt)
+	if ((current.vAcc < 10000) || baro)
 	{
 		flags |= FLAG_VERTICAL_ACC;
 	}
@@ -999,7 +1036,7 @@ static void producerTask(void)
 	}
 
 	prev_flags = flags;
-	prevHeight = altHeight;
+	prevHMSL = alt.hMSL;
 	prevAltKey = altKey;
 }
 
@@ -1198,13 +1235,11 @@ static void consumerTask(void)
 
 			if (config->alt_units == FS_CONFIG_UNITS_METERS)
 			{
-				speech_ptr = altitudeToSpeech(prevHeight / 1000,
-						config->alt_units, config->alt_format, speech_ptr);
+				speech_ptr = altitudeToSpeech((prevHMSL - config->dz_elev) / 1000, config->alt_units, speech_ptr);
 			}
 			else
 			{
-				speech_ptr = altitudeToSpeech(prevHeight * 10 / 3048,
-						config->alt_units, config->alt_format, speech_ptr);
+				speech_ptr = altitudeToSpeech((prevHMSL - config->dz_elev) * 10 / 3048, config->alt_units, speech_ptr);
 			}
 
 			*(speech_ptr++) = '\0';
@@ -1279,6 +1314,9 @@ void FS_AudioControl_DeInit(void)
 
 void FS_AudioControl_UpdateGNSS(const FS_GNSS_Data_t *current)
 {
+	// Fork: use this data, not FS_GNSS_GetData(). The replay mode gives its own.
+	gnssSource = current;
+
 	// Call update task
 	UTIL_SEQ_SetTask(1<<CFG_TASK_FS_AUDIO_CONTROL_PRODUCER_ID, CFG_SCH_PRIO_0);
 }

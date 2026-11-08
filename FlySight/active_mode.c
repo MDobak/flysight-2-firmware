@@ -31,6 +31,7 @@
 #include "audio_control.h"
 #include "baro.h"
 #include "config.h"
+#include "config_ext.h"
 #include "gnss.h"
 #include "hum.h"
 #include "imu.h"
@@ -48,7 +49,7 @@ extern ADC_HandleTypeDef hadc1;
 /* The barometer is on for the log or for the altitude source */
 static bool baroOn(void)
 {
-	return FS_Config_Get()->enable_baro || (FS_Config_Get()->alt_source == 1);
+	return FS_Config_Get()->enable_baro || (FS_ConfigExt_Get()->alt_source == FS_CONFIG_ALT_SOURCE_BARO);
 }
 
 void FS_ActiveMode_Init(void)

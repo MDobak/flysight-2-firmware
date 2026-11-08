@@ -34,7 +34,7 @@
 #include "log.h"
 #include "mode.h"
 #include "pairing_mode.h"
-#include "sensor_mode.h"
+#include "mode_ext.h"
 #include "start_mode.h"
 #include "state.h"
 #include "stm32_seq.h"
@@ -56,7 +56,7 @@ static FS_Mode_State_t FS_Mode_State_Config(FS_Mode_Event_t event);
 static FS_Mode_State_t FS_Mode_State_USB(FS_Mode_Event_t event);
 static FS_Mode_State_t FS_Mode_State_Pairing(FS_Mode_Event_t event);
 static FS_Mode_State_t FS_Mode_State_Start(FS_Mode_Event_t event);
-static FS_Mode_State_t FS_Mode_State_Sensor(FS_Mode_Event_t event);
+static FS_Mode_State_t FS_Mode_State_Ext(FS_Mode_Event_t event);
 static FS_Mode_State_t FS_Mode_EnterRequestedState(void);
 static void FS_Mode_ClearRequestedState(void);
 static void FS_Mode_ExecutePendingTerminalAction(void);
@@ -70,7 +70,7 @@ static FS_Mode_StateFunc_t *const mode_state_table[FS_MODE_STATE_COUNT] =
 	FS_Mode_State_USB,
 	FS_Mode_State_Pairing,
 	FS_Mode_State_Start,
-	FS_Mode_State_Sensor
+	FS_Mode_State_Ext, // Fork: FS_MODE_STATE_SENSOR
 };
 
 static FS_Mode_State_t mode_state = FS_MODE_STATE_SLEEP;
@@ -501,25 +501,24 @@ static FS_Mode_State_t FS_Mode_State_Start(FS_Mode_Event_t event)
 	return next_mode;
 }
 
-static FS_Mode_State_t FS_Mode_State_Sensor(FS_Mode_Event_t event)
+// Fork: one handler for all fork modes (see mode_ext.c)
+static FS_Mode_State_t FS_Mode_State_Ext(FS_Mode_Event_t event)
 {
-	FS_Mode_State_t next_mode = FS_MODE_STATE_SENSOR;
+	FS_Mode_State_t next_mode = mode_state;
+	bool stop = (event == FS_MODE_EVENT_BUTTON_PRESSED) ||
+		(event == FS_MODE_EVENT_EXT_STOP) ||
+		(event == FS_MODE_EVENT_TERMINAL_ACTION);
 
-	if ((event == FS_MODE_EVENT_BUTTON_PRESSED) ||
-		(event == FS_MODE_EVENT_BLE_DISCONNECTED) ||
-		(event == FS_MODE_EVENT_TERMINAL_ACTION))
+	if (event == FS_MODE_EVENT_REQUEST_STATE)
 	{
-		FS_SensorMode_DeInit();
-		next_mode = FS_MODE_STATE_SLEEP;
-	}
-	else if (event == FS_MODE_EVENT_REQUEST_STATE)
-	{
-		if (requested_state == FS_MODE_STATE_SLEEP)
-		{
-			FS_SensorMode_DeInit();
-			next_mode = FS_MODE_STATE_SLEEP;
-		}
+		stop = (requested_state == FS_MODE_STATE_SLEEP);
 		FS_Mode_ClearRequestedState();
+	}
+
+	if (stop)
+	{
+		FS_ModeExt_DeInit(mode_state);
+		next_mode = FS_MODE_STATE_SLEEP;
 	}
 
 	return next_mode;
@@ -560,13 +559,8 @@ static FS_Mode_State_t FS_Mode_EnterRequestedState(void)
 		next_mode = FS_MODE_STATE_START;
 		break;
 
-	case FS_MODE_STATE_SENSOR:
-		FS_SensorMode_Init();
-		next_mode = FS_MODE_STATE_SENSOR;
-		break;
-
 	default:
-		next_mode = FS_MODE_STATE_SLEEP;
+		next_mode = FS_ModeExt_Init(target_state) ? target_state : FS_MODE_STATE_SLEEP; // Fork
 		break;
 	}
 

@@ -34,7 +34,7 @@ typedef enum
 	FS_MODE_EVENT_FORCE_UPDATE,
 	FS_MODE_EVENT_REQUEST_STATE,
 	FS_MODE_EVENT_TERMINAL_ACTION,
-	FS_MODE_EVENT_BLE_DISCONNECTED
+	FS_MODE_EVENT_EXT_STOP // Fork: a fork mode stops (see mode_ext.h)
 } FS_Mode_Event_t;
 
 typedef enum
@@ -45,7 +45,7 @@ typedef enum
 	FS_MODE_STATE_USB,
 	FS_MODE_STATE_PAIRING,
 	FS_MODE_STATE_START,
-	FS_MODE_STATE_SENSOR,
+	FS_MODE_STATE_SENSOR, // Fork
 
 	// Number of modes
 	FS_MODE_STATE_COUNT

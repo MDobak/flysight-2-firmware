@@ -46,6 +46,12 @@
 /* Public API                                                         */
 /* ------------------------------------------------------------------ */
 
+/* Hook: Custom_APP_Init. Registers the BLE task. */
+void    Sensor_BLE_Init(void);
+
+/* Hook: BLE disconnect. Stops the stream, and stops sensor mode. */
+void    Sensor_BLE_OnDisconnect(void);
+
 /* Turn the stream on or off. When it is on, Sensor_BLE_Reset() runs. */
 void    Sensor_BLE_SetEnabled(bool enabled);
 

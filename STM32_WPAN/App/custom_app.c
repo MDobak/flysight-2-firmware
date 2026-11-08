@@ -98,7 +98,6 @@ static Custom_CRS_Packet_t rx_buffer[FS_CRS_WINDOW_LENGTH+1];
 static uint32_t rx_read_index, rx_write_index;
 
 static uint8_t gnss_pv_packet[GNSS_BLE_MAX_LEN];
-static uint8_t sensor_packet[SENSOR_BLE_MAX_LEN];
 
 static uint8_t start_result_packet[9];
 
@@ -106,7 +105,6 @@ static uint8_t connected_flag = 0;
 
 extern uint8_t SizeSd_Gnss_Measurement;
 extern uint8_t SizeSd_Control_Point;
-extern uint8_t SizeSd_Sensor_Measurement;
 
 static uint8_t timeout_timer_id;
 
@@ -142,7 +140,6 @@ static void Custom_CRS_OnDisconnect(void);
 static void Custom_CRS_OnRxWrite(Custom_STM_App_Notification_evt_t *pNotification);
 static void Custom_App_Timeout(void);
 static void Custom_VBAT_Refresh(void);
-static void Custom_Sensor_Task(void);
 /* USER CODE END PFP */
 
 /* Functions Definition ------------------------------------------------------*/
@@ -330,7 +327,7 @@ void Custom_STM_App_Notification(Custom_STM_App_Notification_evt_t *pNotificatio
     case CUSTOM_STM_BATTERY_LEVEL_READ_EVT:
       /* USER CODE BEGIN CUSTOM_STM_BATTERY_LEVEL_READ_EVT */
       APP_DBG_MSG("CUSTOM_STM_BATTERY_LEVEL_READ_EVT received\n");
-      // Active mode updates the level each second. In other modes, measure it now.
+      // Fork: active mode updates the level each second. In other modes, measure it now.
       Custom_VBAT_Refresh();
       Custom_STM_App_Update_Char(CUSTOM_STM_BATTERY_LEVEL, &current_battery_level_percent);
       /* USER CODE END CUSTOM_STM_BATTERY_LEVEL_READ_EVT */
@@ -340,8 +337,8 @@ void Custom_STM_App_Notification(Custom_STM_App_Notification_evt_t *pNotificatio
       /* USER CODE BEGIN CUSTOM_STM_BATTERY_LEVEL_NOTIFY_ENABLED_EVT */
       APP_DBG_MSG("CUSTOM_STM_BATTERY_LEVEL_NOTIFY_ENABLED_EVT received\n");
       Custom_App_Context.Battery_level_Notification_Status = 1;
-      // Send the current level immediately upon enabling notifications
-      Custom_VBAT_Refresh();
+      // Optionally, send the current level immediately upon enabling notifications
+      Custom_VBAT_Refresh(); // Fork
       Custom_STM_App_Update_Char(CUSTOM_STM_BATTERY_LEVEL, &current_battery_level_percent);
       /* USER CODE END CUSTOM_STM_BATTERY_LEVEL_NOTIFY_ENABLED_EVT */
       break;
@@ -391,16 +388,8 @@ void Custom_APP_Notification(Custom_App_ConnHandle_Not_evt_t *pNotification)
     case CUSTOM_DISCON_HANDLE_EVT :
       /* USER CODE BEGIN CUSTOM_DISCON_HANDLE_EVT */
       Custom_CRS_OnDisconnect();
-
-      // Stop the live sensor data
       Custom_App_Context.Sd_sensor_measurement_Notification_Status = 0;
-      Sensor_BLE_SetEnabled(false);
-
-      // Sensor mode is only for a connected client
-      if (FS_Mode_State() == FS_MODE_STATE_SENSOR)
-      {
-        FS_Mode_PushQueue(FS_MODE_EVENT_BLE_DISCONNECTED);
-      }
+      Sensor_BLE_OnDisconnect(); // Fork
       /* USER CODE END CUSTOM_DISCON_HANDLE_EVT */
       break;
 
@@ -434,8 +423,7 @@ void Custom_APP_Init(void)
   Custom_App_Context.Sd_gnss_measurement_Notification_Status = 0;
   Custom_App_Context.Sd_control_point_Indication_Status = 0;
   Custom_App_Context.Sd_sensor_measurement_Notification_Status = 0;
-  Sensor_BLE_SetEnabled(false);
-  UTIL_SEQ_RegTask(1<<CFG_TASK_FS_SENSOR_BLE_ID, UTIL_SEQ_RFU, Custom_Sensor_Task);
+  Sensor_BLE_Init(); // Fork
 
   /* Starter_Pistol */
   Custom_App_Context.Sp_control_point_Indication_Status = 0;
@@ -881,20 +869,6 @@ void Custom_GNSS_Update(const FS_GNSS_Data_t *current)
   }
 }
 
-static void Custom_Sensor_Task(void)
-{
-  uint8_t length;
-
-  if (!Custom_App_Context.Sd_sensor_measurement_Notification_Status) return;
-
-  length = Sensor_BLE_Build(sensor_packet);
-  if (length > 1)
-  {
-    BLE_TX_Queue_SendTxPacket(CUSTOM_STM_SD_SENSOR_MEASUREMENT,
-        sensor_packet, length, &SizeSd_Sensor_Measurement, 0);
-  }
-}
-
 void Custom_Start_Update(uint16_t year, uint8_t month, uint8_t day,
                          uint8_t hour, uint8_t min, uint8_t sec, uint16_t ms)
 {
@@ -947,11 +921,12 @@ static uint8_t calculate_battery_percentage(uint16_t voltage_mv) {
   return (uint8_t)percentage;
 }
 
+// Fork: measure the battery now. Fails in active mode. Then the
+// periodic value is current.
 static void Custom_VBAT_Refresh(void)
 {
   uint16_t voltage;
 
-  // Fails in active mode. Then the periodic value is current.
   if (FS_VBAT_Measure(&voltage))
   {
     current_battery_level_percent = calculate_battery_percentage(voltage);

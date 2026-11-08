@@ -31,6 +31,7 @@
 #include "baro.h"
 #include "charge.h"
 #include "config.h"
+#include "config_ext.h"
 #include "custom_app.h"
 #include "gnss.h"
 #include "hum.h"
@@ -170,7 +171,7 @@ void FS_ActiveControl_DataReady_Callback(void)
 	if (state != FS_CONTROL_ACTIVE) return;
 
 	// Update the altitude reference before the audio uses it
-	FS_AltRef_UpdateGNSS(data, FS_Config_Get()->alt_zero != 0);
+	FS_AltRef_UpdateGNSS(data, FS_ConfigExt_Get()->alt_zero != 0);
 
 	if (FS_Config_Get()->enable_audio)
 	{
