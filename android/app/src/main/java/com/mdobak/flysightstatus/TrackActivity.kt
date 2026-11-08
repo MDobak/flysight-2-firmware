@@ -42,6 +42,8 @@ class TrackActivity : Activity() {
     private lateinit var snackbars: Ui.SnackbarHost
     private lateinit var playback: PlaybackBar
     private lateinit var replayButton: android.widget.ImageView
+    private var flySightButton: android.widget.ImageView? = null
+    private var replay: FlySightReplay? = null
     /** The tracks as loaded: the time of each is from its exit. */
     private var loaded: List<Track> = emptyList()
     /** The tracks that show: with the time of the synchronization. */
@@ -76,7 +78,10 @@ class TrackActivity : Activity() {
 
         chart = TrackChartView(this, ui)
         map = TrackMapView(this)
-        chart.onCursorChanged = { map.setCursor(it) }
+        chart.onCursorChanged = {
+            map.setCursor(it)
+            replay?.onUserCursor()
+        }
         val mapPane = FrameLayout(this).apply {
             addView(map, FrameLayout.LayoutParams(MATCH, MATCH))
             // Above the OpenStreetMap attribution in the bottom-right corner
@@ -105,9 +110,7 @@ class TrackActivity : Activity() {
         bar.addAction(syncButton)
         replayButton = ui.iconButton(R.drawable.ic_play, "Replay") { toggleReplay() }
         bar.addAction(replayButton)
-        if (files.size == 1 && TrackStore.remoteFolder(files[0]) != null) {
-            bar.addAction(ui.iconButton(R.drawable.ic_play, "Replay on FlySight") { replay() })
-        }
+        addFlySightButton()
         // Secondary actions in an overflow menu: the top bar has little space
         lateinit var more: View
         more = ui.iconButton(R.drawable.ic_more, "More options") { showMore(more) }
@@ -116,6 +119,7 @@ class TrackActivity : Activity() {
         progress = ui.linearProgress().apply { isIndeterminate = true }
         controls = ui.column().apply { visibility = View.GONE }
         playback = playbackBar()
+        setUpFlySightReplay()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -136,6 +140,21 @@ class TrackActivity : Activity() {
         }
         setContentView(frame)
         load()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        replay?.listen()
+    }
+
+    override fun onStop() {
+        replay?.stopListening()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        if (replay?.active == true) MainActivity.instance?.snack("The replay continues on the FlySight.")
+        super.onDestroy()
     }
 
     /**
@@ -183,8 +202,10 @@ class TrackActivity : Activity() {
         }
         player.onOpenChanged = { open ->
             pane3d.setReplay(open)
-            replayButton.setImageResource(if (open) R.drawable.ic_stop else R.drawable.ic_play)
-            replayButton.contentDescription = if (open) "Stop the replay" else "Replay"
+            // During the FlySight replay, the FlySight button stops it
+            val inApp = open && !player.remote
+            replayButton.setImageResource(if (inApp) R.drawable.ic_stop else R.drawable.ic_play)
+            replayButton.contentDescription = if (inApp) "Stop the replay" else "Replay"
             replayButton.tooltipText = replayButton.contentDescription
         }
         val previous = chart.onCursorChanged
@@ -197,7 +218,7 @@ class TrackActivity : Activity() {
 
     /** Show the player bar and play, or stop and hide it. */
     private fun toggleReplay() {
-        if (tracks.isEmpty()) return
+        if (tracks.isEmpty() || playback.remote) return
         if (playback.isOpen) playback.close() else playback.open()
     }
 
@@ -356,6 +377,7 @@ class TrackActivity : Activity() {
         labels = TrackStore.labels(files)
         chart.setTracks(tracks, labels)
         map.setTracks(tracks)
+        replay?.setTrack(list[0])
         check3d(list)
         pane3d.view.setTracks(tracks)
         playback.setTracks(tracks)
@@ -444,11 +466,46 @@ class TrackActivity : Activity() {
         updateControls()
     }
 
-    /** The main activity has the connection. It shows the replay dialog. */
-    private fun replay() {
-        startActivity(Intent(this, MainActivity::class.java)
-            .putExtra(MainActivity.EXTRA_REPLAY, files[0].path)
-            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+    /**
+     * The second play button: replay on the FlySight. The FlySight plays the
+     * jump through its audio. The player bar shows its position, and the app
+     * moves the cursor of the chart, the map and the 3D view.
+     */
+    private fun addFlySightButton() {
+        if (files.size != 1 || TrackStore.remoteFolder(files[0]) == null) return
+        val button = ui.iconButton(R.drawable.ic_play_flysight, "Replay on FlySight") {
+            val r = replay ?: return@iconButton snackbars.show("The connection is not available. Open the app again.")
+            if (r.running) r.stop() else r.showStartDialog(ui)
+        }
+        flySightButton = button
+        bar.addAction(button)
+    }
+
+    /** The main activity has the connection. */
+    private fun setUpFlySightReplay() {
+        if (flySightButton == null) return
+        val main = MainActivity.instance ?: return
+        val r = FlySightReplay(main, files[0])
+        replay = r
+        r.onPosition = { t ->
+            chart.showCursor(t)
+            map.setCursor(t)
+            pane3d.view.setCursor(t)
+            playback.showRemoteTime(t)
+        }
+        r.onStatus = { playback.showRemoteStatus(it) }
+        r.onError = { snackbars.show(it, long = true) }
+        r.onRunningChanged = { on ->
+            if (on) playback.openRemote { r.stop() } else playback.closeRemote()
+            flySightButton?.let {
+                it.setImageResource(if (on) R.drawable.ic_stop else R.drawable.ic_play_flysight)
+                it.contentDescription = if (on) "Stop the FlySight replay" else "Replay on FlySight"
+                it.tooltipText = it.contentDescription
+            }
+            // One replay at a time
+            replayButton.isEnabled = !on
+            replayButton.alpha = if (on) 0.38f else 1f
+        }
     }
 
     private fun showDetails() {
