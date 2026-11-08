@@ -190,13 +190,89 @@ class FilesScreen(main: MainActivity) : Screen(main) {
 
     private fun confirmDelete(info: FileInfo) {
         val path = join(currentDir, info.name)
-        main.confirm("Delete ${info.name}?", if (info.isDirectory) "Only an empty folder can be deleted." else "You cannot undo this.", "Delete") {
+        if (info.isDirectory) {
+            main.confirm("Delete ${info.name}?", "The folder and all its files and folders are deleted. You cannot undo this.", "Delete") {
+                deleteFolder(path)
+            }
+            return
+        }
+        main.confirm("Delete ${info.name}?", "You cannot undo this.", "Delete") {
             val f = main.idleFiles() ?: return@confirm
             f.delete(path) { result ->
                 result.onSuccess { main.log("FT: deleted $path"); listDir(currentDir) }
                     .onFailure { showFileMessage(main.fileError("Delete $path", it)) }
             }
         }
+    }
+
+    /**
+     * Delete the folder [root] and all its content. The FlySight deletes only
+     * empty folders, so the app first reads the tree. Then it deletes the
+     * content of each folder before the folder.
+     */
+    private fun deleteFolder(root: String) {
+        if (main.idleFiles() == null) return
+        val folders = ArrayDeque(listOf(root))
+        val order = mutableListOf<String>()
+        var index = 0
+
+        fun stop(text: String) {
+            setFileIdle()
+            listDir(currentDir)
+            showFileMessage(text)
+        }
+
+        fun files(): FileTransfer? {
+            val f = main.files
+            if (f != null && main.connected) return f
+            stop("The delete stopped. The FlySight is not connected.")
+            return null
+        }
+
+        fun deleteNext() {
+            if (index >= order.size) {
+                setFileIdle()
+                main.log("FT: deleted $root (${order.size} items)")
+                main.snack("Deleted $root.")
+                return listDir(currentDir)
+            }
+            val path = order[index++]
+            val f = files() ?: return
+            fileProgress.progress = (index * 1000L / order.size).toInt()
+            fileProgressText.text = "Delete $index of ${order.size}: $path"
+            f.delete(path) { result ->
+                result.onSuccess { deleteNext() }.onFailure {
+                    if (it.message == "Cancelled" || main.files == null) return@delete stop("The delete stopped.")
+                    stop(main.fileError("Delete $path", it) + " A read-only file cannot be deleted.")
+                }
+            }
+        }
+
+        fun scanNext() {
+            val dir = folders.removeFirstOrNull()
+            if (dir == null) {
+                // A folder is after all its content in the reversed order.
+                order.reverse()
+                fileProgress.isIndeterminate = false
+                return deleteNext()
+            }
+            order += dir
+            val f = files() ?: return
+            fileProgressText.text = "Read $dir…"
+            f.list(dir) { result ->
+                result.onSuccess { entries ->
+                    for (e in entries) {
+                        if (e.name == "." || e.name == ".." || e.name.isEmpty()) continue
+                        val child = join(dir, e.name)
+                        if (e.isDirectory) folders.addLast(child) else order += child
+                    }
+                    scanNext()
+                }.onFailure { stop(main.fileError("Read $dir", it)) }
+            }
+        }
+
+        setFileBusy("Read $root…", indeterminate = true)
+        scanNext()
     }
 
     private fun askNewFolder() {
