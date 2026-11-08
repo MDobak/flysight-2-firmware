@@ -2,13 +2,16 @@ package com.example.flysightstatus
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.webkit.MimeTypeMap
 import android.widget.LinearLayout
 import com.example.flysightstatus.Ui.Companion.MATCH
 import com.example.flysightstatus.Ui.Companion.WRAP
@@ -100,7 +103,7 @@ class FilesScreen(main: MainActivity) : Screen(main) {
         val list = ui.column().apply {
             addView(fileMessage)
             addView(fileList)
-            addView(ui.note("Files are available in idle mode only. Tap a file to see the actions. Hold an item to delete it."))
+            addView(ui.note("Files are available in idle mode only. Tap a file to see the actions. Hold a folder to see its actions. Hold a file to delete it."))
         }
         setFileIdle()
         return ui.column().apply {
@@ -135,7 +138,7 @@ class FilesScreen(main: MainActivity) : Screen(main) {
                         if (info.isDirectory) null else "${FileInfo.formatSize(info.size)} · ${info.modified}",
                         ui.avatar(if (info.isDirectory) R.drawable.ic_folder else R.drawable.ic_file),
                     )
-                    item.onClick { onFileSelected(info) }.onLongClick { confirmDelete(info) }
+                    item.onClick { onFileSelected(info) }.onLongClick { onItemHeld(info) }
                     fileList.addView(item)
                 }
                 showFileMessage(if (visible.isEmpty()) "The folder is empty." else null)
@@ -159,6 +162,116 @@ class FilesScreen(main: MainActivity) : Screen(main) {
         }
         actions += "Delete" to { confirmDelete(info) }
         ui.menuDialog(info.name, actions, "$path · ${FileInfo.formatSize(info.size)}").show()
+    }
+
+    private fun onItemHeld(info: FileInfo) {
+        if (!info.isDirectory) return confirmDelete(info)
+        val path = join(currentDir, info.name)
+        ui.menuDialog(info.name, listOf(
+            "Save on the phone" to { downloadFolder(path) },
+            "Delete" to { confirmDelete(info) },
+        ), "$path · The files go to ${phoneFolder(path)}").show()
+    }
+
+    /** The phone folder for the FlySight folder [path], for example Download/FlySight/AUDIO/. */
+    private fun phoneFolder(path: String) =
+        (PHONE_ROOT + "/" + path.trim('/')).trimEnd('/') + "/"
+
+    /**
+     * Save the folder [root] and all its content in the Download folder of the
+     * phone. A file that the app saved before is replaced.
+     */
+    private fun downloadFolder(root: String) {
+        if (main.idleFiles() == null) return
+        val folders = ArrayDeque(listOf(root))
+        val items = mutableListOf<Pair<String, Long>>()
+        val started = System.currentTimeMillis()
+        var total = 0L
+        var done = 0L
+        var index = 0
+
+        fun stop(text: String) {
+            setFileIdle()
+            showFileMessage(text)
+        }
+
+        fun files(): FileTransfer? {
+            val f = main.files
+            if (f != null && main.connected) return f
+            stop("The download stopped. The FlySight is not connected.")
+            return null
+        }
+
+        fun readNext() {
+            if (index >= items.size) {
+                setFileIdle()
+                main.log("FT: saved $root on the phone (${items.size} files), ${rate(done.toInt(), started)}")
+                main.snack("Saved ${items.size} files in ${phoneFolder(root)}.")
+                return
+            }
+            val (path, size) = items[index++]
+            val f = files() ?: return
+            val label = "Download $index of ${items.size}"
+            fileProgressText.text = "$label: $path"
+            f.read(path, progress = { n -> showProgress(done + n, total, label) }) { result ->
+                result.onSuccess { data ->
+                    try {
+                        savePhoneFile(phoneFolder(parentOf(path)), path.substringAfterLast('/'), data)
+                    } catch (e: Exception) {
+                        main.log("Phone file error: $e")
+                        return@read stop("Cannot save $path on the phone: ${e.message}")
+                    }
+                    done += maxOf(size, data.size.toLong())
+                    readNext()
+                }.onFailure {
+                    if (it.message == "Cancelled" || main.files == null) return@read stop("The download stopped.")
+                    stop(main.fileError("Read $path", it))
+                }
+            }
+        }
+
+        fun scanNext() {
+            val dir = folders.removeFirstOrNull()
+            if (dir == null) {
+                if (items.isEmpty()) return stop("$root has no files.")
+                total = items.sumOf { it.second }
+                fileProgress.isIndeterminate = false
+                return readNext()
+            }
+            val f = files() ?: return
+            fileProgressText.text = "Read $dir…"
+            f.list(dir) { result ->
+                result.onSuccess { entries ->
+                    for (e in entries.sortedBy { it.name }) {
+                        if (e.name == "." || e.name == ".." || e.name.isEmpty()) continue
+                        val child = join(dir, e.name)
+                        if (e.isDirectory) folders.addLast(child) else items += child to e.size
+                    }
+                    scanNext()
+                }.onFailure { stop(main.fileError("Read $dir", it)) }
+            }
+        }
+
+        setFileBusy("Read $root…", indeterminate = true)
+        scanNext()
+    }
+
+    /** Write a file into [folder] of the shared Download collection. Replace the file if the app saved it before. */
+    private fun savePhoneFile(folder: String, name: String, data: ByteArray) {
+        val resolver = main.contentResolver
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val existing = resolver.query(collection, arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+            arrayOf(folder, name), null)?.use { c ->
+            if (c.moveToFirst()) android.content.ContentUris.withAppendedId(collection, c.getLong(0)) else null
+        }
+        val uri = existing ?: resolver.insert(collection, ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
+            put(MediaStore.MediaColumns.MIME_TYPE, MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase(Locale.US)) ?: "application/octet-stream")
+        }) ?: throw java.io.IOException("The phone did not make $folder$name")
+        resolver.openOutputStream(uri, "wt")?.use { it.write(data) } ?: throw java.io.IOException("Cannot open $folder$name")
     }
 
     private fun readFile(path: String, size: Long, then: (ByteArray) -> Unit) {
@@ -574,5 +687,6 @@ class FilesScreen(main: MainActivity) : Screen(main) {
 
     private companion object {
         const val MAX_EDIT_SIZE = 64 * 1024L
+        const val PHONE_ROOT = "Download/FlySight"
     }
 }
