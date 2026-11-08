@@ -118,6 +118,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
             R.drawable.ic_jumps to "Jumps",
             R.drawable.ic_s_sensors to "Sensors",
             R.drawable.ic_tune to "Config",
+            R.drawable.ic_folder to "Files",
             R.drawable.ic_bluetooth to "Device",
         )) { selectTab(it) }
         val mainLayer = LinearLayout(this).apply {
@@ -145,7 +146,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         }
         setContentView(root)
 
-        tabs = listOf(HomeScreen(this), JumpsScreen(this), SensorsScreen(this), ConfigScreen(this), DeviceScreen(this))
+        tabs = listOf(HomeScreen(this), JumpsScreen(this), SensorsScreen(this), ConfigScreen(this), FilesScreen(this), DeviceScreen(this))
         for (t in tabs) {
             t.view.visibility = View.GONE
             content.addView(t.view, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -696,6 +697,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         const val REQUEST_SAVE = 11
         const val REQUEST_FIRMWARE = 12
         const val REQUEST_REPLACE = 13
+        const val REQUEST_UPLOAD_FOLDER = 14
         const val REQUEST_IMPORT = 20
         const val REQUEST_TARGET = 30
 
@@ -717,7 +719,8 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         const val TAB_JUMPS = 1
         const val TAB_SENSORS = 2
         const val TAB_CONFIG = 3
-        const val TAB_DEVICE = 4
+        const val TAB_FILES = 4
+        const val TAB_DEVICE = 5
 
         private val STREAMS = setOf(P.SD_GNSS_MEASUREMENT, P.SD_SENSOR_MEASUREMENT)
 

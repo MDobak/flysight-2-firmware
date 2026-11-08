@@ -712,7 +712,8 @@ class Ui(val context: Context) {
                     orientation = VERTICAL
                     gravity = Gravity.CENTER
                     setPadding(0, dp(12), 0, dp(16))
-                    addView(indicator, LayoutParams(dp(64), dp(32)))
+                    // Material uses 64 dp. Six items do not fit on a narrow phone.
+                    addView(indicator, LayoutParams(dp(if (items.size > 5) 56 else 64), dp(32)))
                     addView(label, LayoutParams(WRAP, WRAP).apply { topMargin = dp(4) })
                     contentDescription = item.second
                     setOnClickListener { select(i, notify = true) }

@@ -22,7 +22,7 @@ import java.util.UUID
 import kotlin.math.hypot
 import com.example.flysightstatus.FlySightProtocol as P
 
-/** Test functions: status, files, live data, control points, and the log. */
+/** Test functions: status, live data, control points, and the log. */
 @SuppressLint("SetTextI18n") // English only
 class DeviceScreen(main: MainActivity) : Screen(main) {
 
@@ -30,7 +30,7 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
     private val connectButton = ui.button(Ui.ButtonStyle.TEXT, "Connect") {
         if (main.connection != null) main.disconnect() else main.connectOrScan()
     }
-    private val tabs = ui.Tabs(listOf("Status", "Files", "Live", "Control", "Log")) { selectTab(it) }
+    private val tabs = ui.Tabs(listOf("Status", "Live", "Control", "Log")) { selectTab(it) }
     private val pages = FrameLayout(main)
     private var currentTab = 0
     private var wasConnected = false
@@ -40,18 +40,6 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
     // Status
     private val notConnected = ui.column()
     private val statusItems = linkedMapOf<String, Ui.ListItem>()
-
-    // Files
-    private var currentDir = "/"
-    private var listedOnce = false
-    private val pathText = ui.text(Ui.Type.TITLE_SMALL, "/").apply { typeface = Typeface.MONOSPACE }
-    private val fileList = ui.column()
-    private val fileProgress = ui.linearProgress()
-    private val fileProgressText = ui.text(Ui.Type.BODY_SMALL, "", ui.onSurfaceVariant)
-    private val fileProgressRow = LinearLayout(main)
-    private val fileMessage = ui.text(Ui.Type.BODY_MEDIUM, "", ui.onSurfaceVariant)
-    private var pendingSave: ByteArray? = null
-    private var pendingReplacePath: String? = null
 
     // Live
     private val gnssSwitch = ui.switch(false) { on ->
@@ -82,7 +70,6 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
     init {
         bar.addAction(connectButton)
         pages.addView(buildStatus())
-        pages.addView(buildFiles())
         pages.addView(buildLive())
         pages.addView(buildControl())
         pages.addView(buildLog())
@@ -99,7 +86,6 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
     override fun onShow() {
         updateStatus()
         if (currentTab == TAB_LOG) scrollLogToEnd()
-        if (currentTab == TAB_FILES && !listedOnce && main.connected) listDir(currentDir)
     }
 
     override fun onStateChanged() {
@@ -108,7 +94,6 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
             wasConnected = connected
             if (connected) {
                 if (gnssSwitch.isChecked) main.connection?.setNotifications(P.SENSOR_DATA_SERVICE, P.SD_GNSS_MEASUREMENT, true)
-                if (currentTab == TAB_FILES && main.currentTab == MainActivity.TAB_DEVICE) listDir(currentDir)
             } else {
                 clear()
             }
@@ -120,7 +105,6 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
         currentTab = index
         tabs.select(index)
         for (i in 0 until pages.childCount) pages.getChildAt(i).visibility = if (i == index) View.VISIBLE else View.GONE
-        if (index == TAB_FILES && !listedOnce && main.connected) listDir(currentDir)
         if (index == TAB_LOG) scrollLogToEnd()
     }
 
@@ -129,12 +113,6 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
         gnssItems.values.forEach { it.setSupporting("–") }
         dsResult.setSupporting("–")
         spResult.setSupporting("–")
-        currentDir = "/"
-        pathText.text = currentDir
-        listedOnce = false
-        fileList.removeAllViews()
-        showFileMessage(null)
-        setFileIdle()
     }
 
     // ---- Status ----
@@ -172,261 +150,6 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
         for (key in listOf(MainActivity.INFO_FIRMWARE, MainActivity.INFO_MANUFACTURER, MainActivity.INFO_MODEL)) set(key, main.info[key])
         set("MTU", main.connection?.mtu?.toString())
         set("Updated", main.updated?.format(DateTimeFormatter.ofPattern("HH:mm:ss")))
-    }
-
-    // ---- Files ----
-
-    private fun buildFiles(): View {
-        val toolbar = LinearLayout(main).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(ui.dp(4), 0, ui.dp(4), 0)
-            addView(ui.iconButton(R.drawable.ic_arrow_up, "Parent folder") { if (currentDir != "/") listDir(parentOf(currentDir)) })
-            addView(pathText, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = ui.dp(4) })
-            addView(ui.iconButton(R.drawable.ic_refresh, "Read the folder again") { listDir(currentDir) })
-            addView(ui.iconButton(R.drawable.ic_new_folder, "New folder") { askNewFolder() })
-            addView(ui.iconButton(R.drawable.ic_upload, "Upload a file") { pickFile(MainActivity.REQUEST_UPLOAD) })
-        }
-        fileProgressRow.apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(ui.dp(16), 0, ui.dp(4), 0)
-            addView(fileProgressText, LinearLayout.LayoutParams(0, WRAP, 1f))
-            addView(ui.button(Ui.ButtonStyle.TEXT, "Cancel") { main.files?.cancel() })
-        }
-        fileMessage.setPadding(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(8))
-        val list = ui.column().apply {
-            addView(fileMessage)
-            addView(fileList)
-            addView(ui.note("Files are available in idle mode only. Tap a file to see the actions. Hold an item to delete it."))
-        }
-        setFileIdle()
-        return ui.column().apply {
-            addView(toolbar)
-            addView(fileProgress, LinearLayout.LayoutParams(MATCH, ui.dp(4)))
-            addView(fileProgressRow)
-            addView(ui.scroll(list), LinearLayout.LayoutParams(MATCH, 0, 1f))
-        }
-    }
-
-    private fun join(dir: String, name: String) = JumpSync.join(dir, name)
-
-    private fun parentOf(path: String): String {
-        val i = path.trimEnd('/').lastIndexOf('/')
-        return if (i <= 0) "/" else path.substring(0, i)
-    }
-
-    private fun listDir(path: String) {
-        val f = main.idleFiles() ?: return
-        setFileBusy("Reading $path…", indeterminate = true)
-        f.list(path) { result ->
-            setFileIdle()
-            result.onSuccess { entries ->
-                listedOnce = true
-                currentDir = path
-                pathText.text = path
-                fileList.removeAllViews()
-                val visible = entries.filter { it.name != "." && it.name != ".." }.sortedWith(compareBy({ !it.isDirectory }, { it.name }))
-                for (info in visible) {
-                    val item = ui.ListItem(
-                        if (info.isDirectory) info.name else info.name,
-                        if (info.isDirectory) null else "${FileInfo.formatSize(info.size)} · ${info.modified}",
-                        ui.avatar(if (info.isDirectory) R.drawable.ic_folder else R.drawable.ic_file),
-                    )
-                    item.onClick { onFileSelected(info) }.onLongClick { confirmDelete(info) }
-                    fileList.addView(item)
-                }
-                showFileMessage(if (visible.isEmpty()) "The folder is empty." else null)
-                main.log("FT: listed $path (${entries.size} items)")
-            }.onFailure { showFileMessage(main.fileError("Read $path", it)) }
-        }
-    }
-
-    private fun onFileSelected(info: FileInfo) {
-        val path = join(currentDir, info.name)
-        if (info.isDirectory) return listDir(path)
-        val actions = mutableListOf<Pair<String, () -> Unit>>()
-        if (info.size <= MAX_EDIT_SIZE) actions += "Edit as text" to { readFile(path, info.size) { showEditor(path, it) } }
-        if (info.name.equals("TRACK.CSV", ignoreCase = true)) {
-            actions += "Show in the track viewer" to { readFile(path, info.size) { openTrack(path, it) } }
-        }
-        actions += "Save on the phone" to { readFile(path, info.size) { saveToPhone(info.name, it) } }
-        actions += "Replace with a file from the phone" to {
-            pendingReplacePath = path
-            pickFile(MainActivity.REQUEST_REPLACE)
-        }
-        actions += "Delete" to { confirmDelete(info) }
-        ui.menuDialog(info.name, actions, "$path · ${FileInfo.formatSize(info.size)}").show()
-    }
-
-    private fun readFile(path: String, size: Long, then: (ByteArray) -> Unit) {
-        val f = main.idleFiles() ?: return
-        val started = System.currentTimeMillis()
-        setFileBusy("Download $path…", indeterminate = size <= 0)
-        f.read(path, progress = { n -> showProgress(n.toLong(), size, "Download") }) { result ->
-            setFileIdle()
-            result.onSuccess { data ->
-                main.log("FT: read $path, ${data.size} bytes, ${rate(data.size, started)}")
-                then(data)
-            }.onFailure { showFileMessage(main.fileError("Read $path", it)) }
-        }
-    }
-
-    private fun writeFile(path: String, data: ByteArray, then: () -> Unit = { listDir(currentDir) }) {
-        val f = main.idleFiles() ?: return
-        val started = System.currentTimeMillis()
-        setFileBusy("Upload $path…", indeterminate = false)
-        f.write(path, data, progress = { sent, total -> showProgress(sent.toLong(), total.toLong(), "Upload") }) { result ->
-            setFileIdle()
-            result.onSuccess {
-                main.log("FT: wrote $path, ${data.size} bytes, ${rate(data.size, started)}")
-                main.snack("Saved $path.")
-                then()
-            }.onFailure { showFileMessage(main.fileError("Write $path", it)) }
-        }
-    }
-
-    private fun confirmDelete(info: FileInfo) {
-        val path = join(currentDir, info.name)
-        main.confirm("Delete ${info.name}?", if (info.isDirectory) "Only an empty folder can be deleted." else "You cannot undo this.", "Delete") {
-            val f = main.idleFiles() ?: return@confirm
-            f.delete(path) { result ->
-                result.onSuccess { main.log("FT: deleted $path"); listDir(currentDir) }
-                    .onFailure { showFileMessage(main.fileError("Delete $path", it)) }
-            }
-        }
-    }
-
-    private fun askNewFolder() {
-        ui.inputDialog("New folder", "", "In $currentDir. Maximum 8 characters.",
-            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, okLabel = "Make") { name ->
-            if (name.isEmpty()) return@inputDialog
-            val f = main.idleFiles() ?: return@inputDialog
-            val path = join(currentDir, name)
-            f.mkdir(path) { result ->
-                result.onSuccess { main.log("FT: made folder $path"); listDir(currentDir) }
-                    .onFailure { showFileMessage(main.fileError("Make $path", it)) }
-            }
-        }.show()
-    }
-
-    private fun showEditor(path: String, data: ByteArray) {
-        main.push(TextFileScreen(main, path, data.toString(Charsets.ISO_8859_1)) { text, done ->
-            writeFile(path, text.toByteArray(Charsets.ISO_8859_1)) { done(); listDir(currentDir) }
-        })
-    }
-
-    private fun openTrack(remotePath: String, data: ByteArray) {
-        try {
-            TrackActivity.open(main, TrackStore.save(main, TrackStore.localName(remotePath), data))
-        } catch (e: Exception) {
-            main.snack("Cannot save the track: ${e.message}")
-        }
-    }
-
-    private fun setFileBusy(text: String, indeterminate: Boolean) {
-        fileProgress.visibility = View.VISIBLE
-        fileProgress.isIndeterminate = indeterminate
-        fileProgress.progress = 0
-        fileProgressRow.visibility = View.VISIBLE
-        fileProgressText.text = text
-        showFileMessage(null)
-    }
-
-    private fun setFileIdle() {
-        fileProgress.visibility = View.INVISIBLE
-        fileProgressRow.visibility = View.GONE
-    }
-
-    private fun showProgress(done: Long, total: Long, label: String) {
-        if (total > 0) {
-            fileProgress.isIndeterminate = false
-            fileProgress.progress = (done * 1000 / total).toInt()
-            fileProgressText.text = "$label: ${FileInfo.formatSize(done)} of ${FileInfo.formatSize(total)}"
-        } else {
-            fileProgressText.text = "$label: ${FileInfo.formatSize(done)}"
-        }
-    }
-
-    private fun showFileMessage(text: String?) {
-        fileMessage.text = text ?: ""
-        fileMessage.visibility = if (text == null) View.GONE else View.VISIBLE
-    }
-
-    private fun rate(bytes: Int, startedMs: Long): String {
-        val seconds = (System.currentTimeMillis() - startedMs) / 1000.0
-        return String.format(Locale.US, "%.1f s, %.1f KB/s", seconds, if (seconds > 0) bytes / 1024.0 / seconds else 0.0)
-    }
-
-    // ---- Phone files ----
-
-    private fun pickFile(requestCode: Int) {
-        if (main.idleFiles() == null) return
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-        }
-        @Suppress("DEPRECATION")
-        main.startActivityForResult(intent, requestCode)
-    }
-
-    private fun saveToPhone(name: String, data: ByteArray) {
-        pendingSave = data
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/octet-stream"
-            putExtra(Intent.EXTRA_TITLE, name)
-        }
-        @Suppress("DEPRECATION")
-        main.startActivityForResult(intent, MainActivity.REQUEST_SAVE)
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode !in listOf(MainActivity.REQUEST_SAVE, MainActivity.REQUEST_UPLOAD, MainActivity.REQUEST_REPLACE, MainActivity.REQUEST_FIRMWARE)) return
-        val uri = data?.data
-        if (resultCode != Activity.RESULT_OK || uri == null) {
-            pendingSave = null
-            return
-        }
-        try {
-            when (requestCode) {
-                MainActivity.REQUEST_SAVE -> {
-                    val bytes = pendingSave ?: return
-                    main.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-                    main.snack("Saved ${FileInfo.formatSize(bytes.size.toLong())} on the phone.")
-                    pendingSave = null
-                }
-                MainActivity.REQUEST_UPLOAD -> {
-                    val bytes = main.readUri(uri) ?: return
-                    askUploadName(suggestShortName(main.displayName(uri) ?: "FILE.BIN"), bytes)
-                }
-                MainActivity.REQUEST_REPLACE -> {
-                    val bytes = main.readUri(uri) ?: return
-                    writeFile(pendingReplacePath ?: return, bytes)
-                }
-                MainActivity.REQUEST_FIRMWARE -> uploadFirmware(main.readUri(uri) ?: return)
-            }
-        } catch (e: Exception) {
-            main.snack("Phone file error: ${e.message}")
-            main.log("Phone file error: $e")
-        }
-    }
-
-    private fun askUploadName(suggested: String, data: ByteArray) {
-        ui.inputDialog("Upload ${FileInfo.formatSize(data.size.toLong())} to $currentDir", suggested,
-            "Use a short name: 8 characters, a dot, 3 characters. A file with the same name is replaced.",
-            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, okLabel = "Upload") { name ->
-            if (name.isNotEmpty()) writeFile(join(currentDir, name), data)
-        }.show()
-    }
-
-    /** The FlySight file system has no long file names. Make an 8.3 name. */
-    private fun suggestShortName(name: String): String {
-        val clean = { s: String, n: Int -> s.uppercase(Locale.US).filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(n) }
-        val dot = name.lastIndexOf('.')
-        val base = clean(if (dot > 0) name.substring(0, dot) else name, 8).ifEmpty { "FILE" }
-        val ext = if (dot > 0) clean(name.substring(dot + 1), 3) else ""
-        return if (ext.isEmpty()) base else "$base.$ext"
     }
 
     // ---- Live ----
@@ -520,7 +243,15 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
 
         column.addView(ui.header("Firmware update"))
         column.addView(ui.note("Use an APP.SFB file for the hardware batch of this FlySight. Make it with Scripts/build.sh --batch."))
-        action("Upload APP.SFB", "To /FW/APP.SFB") { pickFile(MainActivity.REQUEST_FIRMWARE) }
+        action("Upload APP.SFB", "To /FW/APP.SFB") {
+            if (main.idleFiles() == null) return@action
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }
+            @Suppress("DEPRECATION")
+            main.startActivityForResult(intent, MainActivity.REQUEST_FIRMWARE)
+        }
         action("Install /FW/APP.SFB", "The FlySight restarts and installs the file") {
             main.confirm("Install /FW/APP.SFB?",
                 "The FlySight restarts and installs the uploaded file. If the file is not correct for this FlySight, the bootloader does not install it.",
@@ -537,21 +268,18 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
         return ui.scroll(column, bar)
     }
 
-    private fun uploadFirmware(data: ByteArray) {
-        if (data.size < 512 || data.copyOfRange(0, 4).toString(Charsets.ISO_8859_1) != "SFU1") {
-            ui.dialog("This is not an APP.SFB file", "An update file starts with \"SFU1\". Make it with Scripts/build.sh --batch.",
-                positive = Ui.DialogButton("OK"), negative = null).show()
-            return
-        }
-        val f = main.idleFiles() ?: return
-        selectTab(TAB_FILES)
-        // The folder is usually there. A NAK only means that it exists.
-        f.mkdir("/FW") { _ ->
-            writeFile("/FW/APP.SFB", data) {
-                listDir("/FW")
-                main.confirm("Upload complete", "Install /FW/APP.SFB now?", "Install") { main.sendDs(P.DS_CMD_INSTALL_FIRMWARE) }
-            }
-        }
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != MainActivity.REQUEST_FIRMWARE) return
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) return
+        val bytes = try {
+            main.readUri(uri)
+        } catch (e: Exception) {
+            main.snack("Phone file error: ${e.message}")
+            null
+        } ?: return
+        main.selectTab(MainActivity.TAB_FILES)
+        main.tab(FilesScreen::class.java).uploadFirmware(bytes)
     }
 
     override fun onValue(characteristic: UUID, value: ByteArray) {
@@ -617,9 +345,7 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
     private fun scrollLogToEnd() = logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
 
     companion object {
-        private const val TAB_FILES = 1
-        private const val TAB_LOG = 4
-        private const val MAX_EDIT_SIZE = 64 * 1024L
+        private const val TAB_LOG = 3
 
         private const val G_TOW = "Time of week"
         private const val G_POSITION = "Position"
