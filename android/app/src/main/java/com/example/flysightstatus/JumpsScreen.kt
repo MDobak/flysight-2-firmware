@@ -38,8 +38,10 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
     private var selecting = false
     private val selected = linkedSetOf<String>()
 
-    private var sessions: List<JumpSync.Session>? = null
-    private var finding = false
+    private val sessions get() = main.sync.known
+    private val finding get() = main.sync.finding
+    private var failed = false
+    private var shownSessions: List<JumpSync.Session>? = null
     private var remoteError: String? = null
     private var wasConnected = false
 
@@ -69,7 +71,7 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
 
     override fun onShow() {
         if (segment == 0) updatePhone() else updateRemote()
-        if (segment == 1 && main.connected && sessions == null && !finding) findRemote()
+        if (segment == 1 && main.connected && sessions == null && !finding && !failed) findRemote()
     }
 
     override fun onStateChanged() {
@@ -77,13 +79,15 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
         if (connected != wasConnected) {
             wasConnected = connected
             if (!connected) {
-                sessions = null
+                failed = false
                 remoteError = null
             }
             if (segment == 1) {
                 updateRemote()
-                if (connected && main.currentTab == MainActivity.TAB_JUMPS && sessions == null && !finding) findRemote()
+                if (connected && main.currentTab == MainActivity.TAB_JUMPS && sessions == null && !finding && !failed) findRemote()
             }
+        } else if (segment == 1 && sessions !== shownSessions) {
+            updateRemote()
         }
         updateProgress()
     }
@@ -252,17 +256,12 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
 
     private fun findRemote() {
         if (main.idleFiles() == null) return
-        finding = true
         remoteError = null
-        updateProgress()
-        main.sync.findAll(found = { list ->
-            sessions = list
-            updateRemote()
-        }) { result ->
-            finding = false
-            result.onSuccess { sessions = it }.onFailure {
+        failed = false
+        main.sync.findAll(found = { updateRemote() }) { result ->
+            result.onFailure {
                 remoteError = if (it.message == "Cancelled") null else main.fileError("Read the FlySight", it)
-                if (sessions == null) sessions = emptyList()
+                failed = true
             }
             updateRemote()
             updateProgress()
@@ -284,7 +283,8 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
                 setPadding(ui.dp(16), ui.dp(12), ui.dp(16), ui.dp(12))
             }, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(8)) })
         }
-        val list = sessions
+        val list = sessions ?: if (failed) emptyList() else null
+        shownSessions = sessions
         if (list == null || (list.isEmpty() && finding)) {
             remoteList.addView(ui.note("Reading the FlySight…").apply { setPadding(ui.dp(16), ui.dp(16), ui.dp(16), 0) })
             return
@@ -316,7 +316,8 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
         }
     }
 
-    private fun openRemote(session: JumpSync.Session) {
+    /** Open a session. Download it first if it is not on the phone. */
+    fun openRemote(session: JumpSync.Session) {
         val local = session.localFile(main)
         if (local.exists()) return TrackActivity.open(main, local)
         if (main.idleFiles() == null) return

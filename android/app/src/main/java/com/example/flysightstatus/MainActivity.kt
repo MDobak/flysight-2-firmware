@@ -587,6 +587,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
     private fun clearDeviceData() {
         battery = null
         mode = DeviceMode.UNKNOWN
+        sync.forget()
         info.clear()
         updated = null
     }

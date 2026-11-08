@@ -27,6 +27,12 @@ class JumpSync(private val main: MainActivity) {
         private set
     var progress: Progress? = null
         private set
+    /** All sessions on the FlySight from the last [findAll], or null if not known. */
+    var known: List<Session>? = null
+        private set
+    /** True while [findAll] runs. */
+    var finding = false
+        private set
     /** Text of the current step, for example "Reading /26-11-07…". */
     var status: String = ""
         private set
@@ -43,8 +49,24 @@ class JumpSync(private val main: MainActivity) {
     }
 
     /** All sessions, the newest first. [found] is called after each folder. */
-    fun findAll(found: (List<Session>) -> Unit, done: (Result<List<Session>>) -> Unit) =
-        find(after = null, newestDayOnly = false, found, done)
+    fun findAll(found: (List<Session>) -> Unit, done: (Result<List<Session>>) -> Unit) {
+        if (running) return done(Result.failure(IllegalStateException("Wait for the current file operation")))
+        finding = true
+        find(after = null, newestDayOnly = false, found = { list ->
+            known = list
+            found(list)
+        }) { result ->
+            finding = false
+            result.onSuccess { known = it }
+            done(result)
+            changed()
+        }
+    }
+
+    /** Clear the list of known sessions, for example after a disconnect. */
+    fun forget() {
+        known = null
+    }
 
     /**
      * Download the sessions that are newer than the newest session on the

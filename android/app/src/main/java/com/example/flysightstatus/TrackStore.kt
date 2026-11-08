@@ -73,7 +73,7 @@ object TrackStore {
             ?.sortedWith(compareByDescending<File> { sortKey(it) }) ?: emptyList()
 
     /** Sessions sort by their folder name. Other files sort by the time of the import. */
-    private fun sortKey(file: File): String =
+    fun sortKey(file: File): String =
         if (LOCAL_SESSION.matches(file.nameWithoutExtension)) file.nameWithoutExtension
         else LocalDateTime.ofEpochSecond(file.lastModified() / 1000, 0, ZoneOffset.UTC)
             .format(DateTimeFormatter.ofPattern("yy-MM-dd_HH-mm-ss"))

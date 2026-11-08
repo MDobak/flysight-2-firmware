@@ -41,6 +41,9 @@ class HomeScreen(main: MainActivity) : Screen(main) {
     }
     private val tools = ui.column()
     private var elevation: GroundElevation? = null
+    private var remoteTried = false
+    private var shownRemote: List<JumpSync.Session>? = null
+    private var syncWasRunning = false
 
     override val view: View
 
@@ -135,11 +138,28 @@ class HomeScreen(main: MainActivity) : Screen(main) {
     override fun onShow() {
         updateCard()
         updateJumps()
+        findRemote()
     }
 
     override fun onStateChanged() {
         updateCard()
         elevation?.onStateChanged()
+        if (!main.connected) remoteTried = false
+        val syncEnded = syncWasRunning && !main.sync.running
+        syncWasRunning = main.sync.running
+        if (syncEnded || main.sync.known !== shownRemote) updateJumps()
+        findRemote()
+    }
+
+    /** Read the session list on the FlySight one time after it connects, to show where each jump is. */
+    private fun findRemote() {
+        val f = main.files
+        if (remoteTried || main.currentTab != MainActivity.TAB_HOME || !main.connected || main.mode != DeviceMode.SLEEP ||
+            main.sync.known != null || main.sync.running || f == null || f.busy) return
+        remoteTried = true
+        main.sync.findAll(found = {}) { result ->
+            result.onFailure { main.log("Jumps: cannot read the FlySight: ${it.message}") }
+        }
     }
 
     override fun onHide() {
@@ -278,10 +298,21 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         }
     }
 
+    /** A recent jump. [file] is null if the jump is only on the FlySight. [session] is null if it is only on the phone or not known. */
+    private class Recent(val sort: String, val file: File?, val session: JumpSync.Session?)
+
     private fun updateJumps() {
         jumps.removeAllViews()
+        val remote = main.sync.known
+        shownRemote = remote
         val files = TrackStore.list(main)
-        if (files.isEmpty()) {
+        val byKey = remote.orEmpty().associateBy { it.key }
+        val localKeys = files.map { it.nameWithoutExtension }.toSet()
+        val recent = (files.map { Recent(TrackStore.sortKey(it), it, byKey[it.nameWithoutExtension]) } +
+            remote.orEmpty().filter { it.key !in localKeys }.map { Recent(if (it.date != null) it.key else "", null, it) })
+            .sortedByDescending { it.sort }
+            .take(RECENT)
+        if (recent.isEmpty()) {
             jumps.addView(ui.emptyState(R.drawable.ic_jumps, "No jumps yet",
                 "Your jumps show here after you get them from the FlySight. You can also import a TRACK.CSV file on the Jumps screen."))
             return
@@ -289,9 +320,26 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         jumps.addView(ui.header("Recent jumps", ui.button(Ui.ButtonStyle.TEXT, "All jumps") {
             main.selectTab(MainActivity.TAB_JUMPS)
         }))
-        for (file in files.take(RECENT)) {
-            jumps.addView(jumpItem(ui, file, TrackStore.title(file)).onClick { TrackActivity.open(main, file) })
+        for (jump in recent) {
+            val file = jump.file
+            val session = jump.session
+            val item = if (file != null) {
+                val where = when {
+                    remote == null -> null
+                    session != null -> "On the phone and the FlySight"
+                    else -> "On the phone only"
+                }
+                jumpItem(ui, file, TrackStore.title(file), where).onClick { TrackActivity.open(main, file) }
+            } else {
+                ui.ListItem(TrackStore.title(File(session!!.key + ".csv")), "On the FlySight only · Tap to download",
+                    ui.avatar(R.drawable.ic_download)).onClick { openSession(session) }
+            }
+            jumps.addView(item)
         }
+    }
+
+    private fun openSession(session: JumpSync.Session) {
+        main.tab(JumpsScreen::class.java).openRemote(session)
     }
 
     private class Mode(val title: String, val how: String, val led: String, val color: Int?, val pulse: Boolean = false)
@@ -334,10 +382,11 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         )
 
         /** A list item for a saved jump. The summary comes when the metadata is known. */
-        fun jumpItem(ui: Ui, file: File, headline: String): Ui.ListItem {
-            val item = ui.ListItem(headline, "…", ui.avatar(R.drawable.ic_jumps))
+        fun jumpItem(ui: Ui, file: File, headline: String, where: String? = null): Ui.ListItem {
+            val item = ui.ListItem(headline, where ?: "…", ui.avatar(R.drawable.ic_jumps))
             TrackStore.loadMeta(file) { meta ->
-                item.setSupporting(meta?.summary() ?: "Cannot read this track")
+                val summary = meta?.summary() ?: "Cannot read this track"
+                item.setSupporting(if (where != null) "$where\n$summary" else summary)
             }
             return item
         }
