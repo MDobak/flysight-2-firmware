@@ -46,6 +46,7 @@ typedef enum
 	FS_MODE_STATE_PAIRING,
 	FS_MODE_STATE_START,
 	FS_MODE_STATE_SENSOR, // Fork
+	FS_MODE_STATE_REPLAY, // Fork
 
 	// Number of modes
 	FS_MODE_STATE_COUNT

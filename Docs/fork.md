@@ -18,7 +18,9 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 | `FlySight/alt_ref.c/h` | Altitude reference: ground level (zero), barometer height, and `Alt_Source`. |
 | `FlySight/config_ext.c/h` | Fork configuration keys (`Alt_Source`, `Alt_Zero`, `Alt_Format`). |
 | `FlySight/device_state_ext.c/h` | Fork `DS_Control_Point` commands. |
-| `FlySight/mode_ext.c/h` | Fork modes (sensor mode). |
+| `FlySight/mode_ext.c/h` | Fork modes (sensor mode and replay mode). |
+| `FlySight/replay_mode.c/h` | Replay mode. |
+| `FlySight/replay_parse.c/h` | Parsers for `track.csv` and `sensor.csv`. No hardware. |
 | `FlySight/sensor_ble.c/h` | `SD_Sensor_Measurement` packets and the BLE task. |
 | `FlySight/sensor_mode.c/h` | Sensor mode. |
 | `FlySight/tone_ext.c/h` | The change of value 1 for `Mode_2: 9` (slope of the last second). No hardware. |
@@ -28,6 +30,7 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 | `Audio/words.tsv` | The words of the new sound files. |
 | `Samples/wingsuit/` | A sample wingsuit jump from an airplane, as a log folder of the FlySight. `SOURCE.txt` gives the source and the license. |
 | `Scripts/build.sh`, `Scripts/make_sfb.py` | Build without STM32CubeIDE, and make `APP.SFB`. |
+| `Tests/test_replay_parse.c` | Host test for `replay_parse.c`. The file shows the command. |
 | `web/` | A website in Go: it makes `APP.SFB` from `FLYSIGHT.TXT`, and gives the new sound files and the sample jump as ZIP files, and the Android app. `web/Dockerfile` makes an image with all files of the website. See `web/README.md`. |
 | `.github/workflows/web-image.yml` | GitHub Actions: builds the website image and pushes it to `ghcr.io`. |
 
@@ -35,10 +38,10 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 
 | File | Hook |
 |------|------|
-| `Core/Inc/app_conf.h` | `CFG_TASK_FS_SENSOR_BLE_ID` in the task list. |
+| `Core/Inc/app_conf.h` | `CFG_TASK_FS_SENSOR_BLE_ID` and `CFG_TASK_FS_REPLAY_ID` in the task list. |
 | `FlySight/config.c` | `FS_ConfigExt_Init()`, `FS_ConfigExt_Handle()`, `FS_ConfigExt_Write()`, and `enable_nav = 1` (no `Device_ID` lock). |
-| `FlySight/device_state.c` | `DS_CMD_REQUEST_SENSOR` (`0x15`) as a mode request, and `DeviceStateExt_Handle()` in the `default` case. |
-| `FlySight/mode.c`, `mode.h` | `FS_MODE_STATE_SENSOR`, `FS_MODE_EVENT_EXT_STOP`, the `FS_Mode_State_Ext` handler, and `FS_ModeExt_Init()` in `FS_Mode_EnterRequestedState`. |
+| `FlySight/device_state.c` | `DS_CMD_REQUEST_SENSOR` (`0x15`) and `DS_CMD_REQUEST_REPLAY` (`0x19`) as mode requests, and `DeviceStateExt_Handle()` in the `default` case. |
+| `FlySight/mode.c`, `mode.h` | `FS_MODE_STATE_SENSOR`, `FS_MODE_STATE_REPLAY`, `FS_MODE_EVENT_EXT_STOP`, the `FS_Mode_State_Ext` handler, and `FS_ModeExt_Init()` in `FS_Mode_EnterRequestedState`. |
 | `FlySight/active_mode.c` | `FS_AltRef_Start()`, and the barometer is on for `Alt_Source: 1`. |
 | `FlySight/active_control.c` | `Sensor_BLE_DataReady()` in the sensor callbacks, `FS_AltRef_UpdateBaro()`, and `FS_AltRef_UpdateGNSS()`. |
 | `FlySight/audio.c`, `audio.h` | The tone generator (see [Tone](#tone)): `FS_Audio_Voice_t`, the fade in `FS_Audio_LoadTone()`, `FS_Audio_Splice()`, and the splice in `FS_Audio_Beep()`. New functions: `FS_Audio_Tone()`, `FS_Audio_SetToneFrequency()`, `FS_Audio_EndTone()`, `FS_Audio_FadeOut()`, `FS_Audio_IsTone()`, and `FS_Audio_IsQuiet()`. |
@@ -83,6 +86,21 @@ These extensions add to [ble.md](ble.md).
 - `SD_GNSS_Measurement` and `SD_Sensor_Measurement` notifications are available if subscribed.
 - The FlySight goes back to Idle on `DS_CMD_REQUEST_SLEEP`, on a button push, or when the BLE connection closes.
 
+### Replay mode
+
+| Value | Mode | Description |
+|-------|------|-------------|
+| `0x07` | REPLAY | Plays a recorded track through the audio. No recording. No file access over BLE. |
+
+- The LED pulses green. On an error, the LED is red and the FlySight goes back to Idle.
+- A central sets the track with `DS_CMD_SET_REPLAY` (`0x18`). Then it starts replay mode from Idle with `DS_CMD_REQUEST_REPLAY` (`0x19`).
+- The FlySight reads `config.txt` and the selected profile. Then it reads `track.csv` of the log folder at real-time speed. It reads the barometer data from `sensor.csv` if the file is there.
+- Each `$GNSS` row goes to the altitude reference and to the audio, as a GNSS measurement does in active mode. A row with `hAcc` above 1 km has no fix.
+- There is no GNSS, no log, and no ActiveLook. The speech timing follows the rows of the track, not `Rate`.
+- At the start, the ground level is clear. With bit 15 of the start offset, the FlySight sets the ground level from the first measurements of the track. At the end, the FlySight sets the ground level that it had before the replay.
+- Before the start offset, the rows go only to the altitude reference, without audio.
+- The FlySight goes back to Idle 5 s after the end of the track, on `DS_CMD_REQUEST_SLEEP`, or on a button push. A BLE disconnect does not stop the replay.
+
 ### `SD_Sensor_Measurement`
 
 - UUID: `00000008-8e22-4541-9d4c-21edae82ed19`, in the Sensor_Data service.
@@ -112,6 +130,11 @@ A sensor that has no new value since the last packet is not in the packet. Keep 
   - Payload none: set the two parts to the current position. Accepted only in active and sensor mode. The GNSS part is set if the last 10 GNSS measurements had a 3D fix and a vertical accuracy better than 10 m. The barometer part is set after 10 barometer averages.
   - Payload 9 bytes: set the parts to the values. Accepted in all modes. `uint8` parts to set (`0x01` GNSS, `0x02` barometer), `int32` GNSS ground level (mm above sea level), `int32` ground pressure (Pa × 100). The firmware ignores the value of a part that is not in the parts byte. A ground pressure of 0 or less is not set.
 - `0x17` (`DS_CMD_GET_ALT_ZERO`): Get the ground level. Accepted in all modes. Payload: none.
+- `0x18` (`DS_CMD_SET_REPLAY`): Set the track for replay mode. Not accepted in replay mode. Payload:
+  - Bytes 0-1: `uint16` (little-endian). Bits 0-14: start offset in seconds after the first row. Bit 15: set the ground level from the start of the track.
+  - Bytes 2 and up: the log folder without the leading slash, 1 to 17 characters, no NUL. For example `24-05-01/12-34-56` or `temp/0001`.
+- `0x19` (`DS_CMD_REQUEST_REPLAY`): Request replay mode. Accepted only from sleep.
+- `0x1A` (`DS_CMD_GET_REPLAY`): Get the replay status. Accepted in all modes. Payload: none.
 
 Response data of `0x16` and `0x17` (16 bytes, little-endian):
 
@@ -125,7 +148,19 @@ Response data of `0x16` and `0x17` (16 bytes, little-endian):
 | 11 | `uint8` | `Alt_Zero` of the last configuration that the firmware read. |
 | 12 | `int32` | `DZ_Elev` of the last configuration that the firmware read (mm). |
 
-Notes:
+Response data of `0x1A` (11 bytes, little-endian):
+
+| Offset | Type | Value |
+|--------|------|-------|
+| 0 | `uint8` | State: 0 idle, 1 seeking (goes to the start offset), 2 playing, 3 done, 4 stopped, 5 error. |
+| 1 | `uint8` | Error: 0 none, 1 no track was set, 2 no microSD card, 3 `track.csv` cannot be opened, 4 no GNSS data. |
+| 2 | `uint32` | Time of the last row after the first row (ms). |
+| 6 | `int32` | Height above the ground of the last row (mm). |
+| 10 | `uint8` | Source of the height: 0 GNSS above `DZ_Elev`, 1 GNSS above the ground level, 2 barometer. |
+
+The status stays after replay mode ends.
+
+Notes about the ground level:
 
 - RAM keeps the zero in sleep mode. A reset clears it.
 - With a GNSS zero, the firmware ignores `DZ_Elev`.

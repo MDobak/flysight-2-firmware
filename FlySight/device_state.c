@@ -50,6 +50,7 @@
 #define DS_CMD_REQUEST_CONFIG  0x13 // Payload: (none)
 #define DS_CMD_REQUEST_PAIRING 0x14 // Payload: (none)
 #define DS_CMD_REQUEST_SENSOR  0x15 // Payload: (none). Fork, see device_state_ext.h
+#define DS_CMD_REQUEST_REPLAY  0x19 // Payload: (none). Fork, see device_state_ext.h
 
 #define DS_RESPONSE_FALLBACK_MSEC 200
 #define DS_RESPONSE_FALLBACK_TICKS (DS_RESPONSE_FALLBACK_MSEC*1000/CFG_TS_TICK_VAL)
@@ -201,6 +202,7 @@ void DeviceState_Handle_DS_ControlPointWrite(const uint8_t *payload, uint8_t len
             case DS_CMD_REQUEST_CONFIG:
             case DS_CMD_REQUEST_PAIRING:
             case DS_CMD_REQUEST_SENSOR:
+            case DS_CMD_REQUEST_REPLAY:
                 if (params_len != 0) {
                     status = CP_STATUS_INVALID_PARAMETER;
                 } else if (!mode_request_from_opcode(received_cmd_opcode, &request.target_state)) {
@@ -427,6 +429,9 @@ static bool mode_request_from_opcode(uint8_t opcode, FS_Mode_State_t *target_sta
             return true;
         case DS_CMD_REQUEST_SENSOR:
             *target_state = FS_MODE_STATE_SENSOR;
+            return true;
+        case DS_CMD_REQUEST_REPLAY:
+            *target_state = FS_MODE_STATE_REPLAY;
             return true;
         default:
             return false;

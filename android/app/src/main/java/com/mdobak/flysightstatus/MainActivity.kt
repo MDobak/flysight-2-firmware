@@ -94,6 +94,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
     var currentTab = 0
         private set
     private val pushed = ArrayDeque<Screen>()
+    private var replay: ReplayDialog? = null
 
     val logLines = ArrayDeque<String>()
 
@@ -167,6 +168,22 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback)
 
         autoConnect()
+        handleReplayIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleReplayIntent(intent)
+    }
+
+    /** The track viewer opens the replay dialog here, because this activity has the connection. */
+    private fun handleReplayIntent(intent: Intent?) {
+        val path = intent?.getStringExtra(EXTRA_REPLAY) ?: return
+        intent.removeExtra(EXTRA_REPLAY)
+        replay?.dismiss()
+        val dialog = ReplayDialog(this, java.io.File(path)) { replay = null }
+        replay = dialog
+        dialog.show()
     }
 
     /** The receive screen opens a tab ([EXTRA_TAB]) in the running app. */
@@ -271,6 +288,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         if (!::tabs.isInitialized) return
         tabs.forEach { it.onStateChanged() }
         pushed.forEach { it.onStateChanged() }
+        replay?.onStateChanged()
     }
 
     /** The file transfer if the app can use it now. Otherwise show why not and return null. */
@@ -710,6 +728,15 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         handler.postDelayed(idleTimeout, MODE_TIMEOUT_MS)
     }
 
+    /** Run [action] in idle mode. In other modes, request idle mode first. */
+    fun whenIdle(action: () -> Unit) {
+        if (mode == DeviceMode.SLEEP || mode == DeviceMode.UNKNOWN) return action()
+        idleWaiters += action
+        sendDs(P.DS_CMD_REQUEST_SLEEP)
+        handler.removeCallbacks(idleTimeout)
+        handler.postDelayed(idleTimeout, MODE_TIMEOUT_MS)
+    }
+
     private fun runIdleWaiters() {
         if (idleWaiters.isEmpty()) return
         handler.removeCallbacks(idleTimeout)
@@ -777,6 +804,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         }
         updated = LocalTime.now()
         (tabs + pushed).forEach { it.onValue(characteristic, value) }
+        replay?.onValue(characteristic, value)
         onStateChanged()
     }
 
@@ -789,6 +817,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         const val REQUEST_UPLOAD_FOLDER = 14
         const val REQUEST_IMPORT = 20
         const val REQUEST_TARGET = 30
+        const val EXTRA_REPLAY = "replay"
 
         private const val SCAN_TIME_MS = 15_000L
         private const val KEEP_ALIVE_MS = 15_000L

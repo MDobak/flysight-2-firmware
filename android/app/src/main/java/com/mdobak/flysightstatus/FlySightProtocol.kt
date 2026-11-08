@@ -88,6 +88,9 @@ object FlySightProtocol {
     const val DS_CMD_REQUEST_SENSOR = 0x15
     const val DS_CMD_SET_ALT_ZERO = 0x16
     const val DS_CMD_GET_ALT_ZERO = 0x17
+    const val DS_CMD_SET_REPLAY = 0x18
+    const val DS_CMD_REQUEST_REPLAY = 0x19
+    const val DS_CMD_GET_REPLAY = 0x1A
 
     val DS_COMMAND_NAMES = mapOf(
         DS_CMD_GET_FW_VERSION to "Get firmware version",
@@ -102,6 +105,9 @@ object FlySightProtocol {
         DS_CMD_REQUEST_SENSOR to "Request sensor",
         DS_CMD_SET_ALT_ZERO to "Set ground level",
         DS_CMD_GET_ALT_ZERO to "Get ground level",
+        DS_CMD_SET_REPLAY to "Set replay track",
+        DS_CMD_REQUEST_REPLAY to "Request replay",
+        DS_CMD_GET_REPLAY to "Get replay status",
     )
 
     val SD_COMMAND_NAMES = mapOf(SD_CMD_SET_MASK to "Set GNSS mask", SD_CMD_GET_MASK to "Get GNSS mask")
@@ -146,6 +152,7 @@ enum class DeviceMode(val label: String) {
     PAIRING("Pairing"),
     START("Start"),
     SENSOR("Sensor"),
+    REPLAY("Replay"),
     UNKNOWN("Unknown");
 
     companion object {
@@ -222,6 +229,45 @@ data class AltZero(
 
         /** Standard-atmosphere altitude (m) of a pressure (Pa). */
         fun pressureAltitude(pa: Double) = 44330.77 * (1 - Math.pow(pa / 101325.0, 0.190263))
+    }
+}
+
+/** Response data of DS_CMD_GET_REPLAY. */
+data class ReplayStatus(
+    val state: Int,
+    val error: Int,
+    /** Time of the last sample after the first row of the track (ms). */
+    val positionMs: Long,
+    /** Height above the ground of the last sample (m). */
+    val heightM: Double,
+    /** Source of the height: [KIND_DZ_ELEV], [KIND_GNSS], or [KIND_BARO]. */
+    val kind: Int,
+) {
+    val running get() = state == SEEKING || state == PLAYING
+
+    companion object {
+        const val IDLE = 0
+        const val SEEKING = 1
+        const val PLAYING = 2
+        const val DONE = 3
+        const val STOPPED = 4
+        const val ERROR = 5
+
+        const val ERROR_NO_TRACK = 1
+        const val ERROR_SD = 2
+        const val ERROR_OPEN = 3
+        const val ERROR_NO_DATA = 4
+
+        const val KIND_DZ_ELEV = 0
+        const val KIND_GNSS = 1
+        const val KIND_BARO = 2
+
+        fun parse(data: ByteArray): ReplayStatus? = try {
+            val r = PacketReader(data)
+            ReplayStatus(r.u8(), r.u8(), r.s32().toLong() and 0xffffffffL, r.s32() / 1000.0, r.u8())
+        } catch (_: Exception) {
+            null
+        }
     }
 }
 

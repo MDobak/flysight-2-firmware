@@ -105,6 +105,9 @@ class TrackActivity : Activity() {
         bar.addAction(syncButton)
         replayButton = ui.iconButton(R.drawable.ic_play, "Replay") { toggleReplay() }
         bar.addAction(replayButton)
+        if (files.size == 1 && TrackStore.remoteFolder(files[0]) != null) {
+            bar.addAction(ui.iconButton(R.drawable.ic_play, "Replay on FlySight") { replay() })
+        }
         // Secondary actions in an overflow menu: the top bar has little space
         lateinit var more: View
         more = ui.iconButton(R.drawable.ic_more, "More options") { showMore(more) }
@@ -439,6 +442,13 @@ class TrackActivity : Activity() {
             controls.addView(ui.chipRow(*trackChips.toTypedArray()))
         }
         updateControls()
+    }
+
+    /** The main activity has the connection. It shows the replay dialog. */
+    private fun replay() {
+        startActivity(Intent(this, MainActivity::class.java)
+            .putExtra(MainActivity.EXTRA_REPLAY, files[0].path)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
     }
 
     private fun showDetails() {

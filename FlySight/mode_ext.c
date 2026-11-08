@@ -22,6 +22,7 @@
 ****************************************************************************/
 
 #include "mode_ext.h"
+#include "replay_mode.h"
 #include "sensor_mode.h"
 
 bool FS_ModeExt_Init(FS_Mode_State_t state)
@@ -32,6 +33,10 @@ bool FS_ModeExt_Init(FS_Mode_State_t state)
 	{
 	case FS_MODE_STATE_SENSOR:
 		FS_SensorMode_Init();
+		break;
+
+	case FS_MODE_STATE_REPLAY:
+		FS_ReplayMode_Init();
 		break;
 
 	default:
@@ -48,6 +53,10 @@ void FS_ModeExt_DeInit(FS_Mode_State_t state)
 	{
 	case FS_MODE_STATE_SENSOR:
 		FS_SensorMode_DeInit();
+		break;
+
+	case FS_MODE_STATE_REPLAY:
+		FS_ReplayMode_DeInit();
 		break;
 
 	default:

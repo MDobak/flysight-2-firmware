@@ -255,6 +255,19 @@ object TrackStore {
     /** True for a session that the app got from the FlySight. */
     fun isSession(file: File) = LOCAL_SESSION.matches(file.nameWithoutExtension)
 
+    private val LOCAL_TEMP = Regex("""TEMP_(\d{4})""")
+
+    /**
+     * The log folder on the FlySight, without the leading slash, or null for an
+     * imported file. "26-11-07_12-34-56.csv" gives "26-11-07/12-34-56".
+     */
+    fun remoteFolder(file: File): String? {
+        val name = file.nameWithoutExtension
+        LOCAL_SESSION.matchEntire(name)?.let { return name.replace('_', '/') }
+        LOCAL_TEMP.matchEntire(name)?.let { return "temp/${it.groupValues[1]}" }
+        return null
+    }
+
     // ---- Names ----
 
     /** The name that the user gave to the jump, or null. */

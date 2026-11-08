@@ -69,6 +69,10 @@ uint8_t FS_AltRef_SetZeroValues(uint8_t mask, int32_t ground_hmsl, int32_t groun
 
 const FS_AltRef_Zero_t *FS_AltRef_GetZero(void);
 
+/* Set the zero to saved values. The replay mode uses this to keep the
+   zero of the real jump. */
+void FS_AltRef_RestoreZero(const FS_AltRef_Zero_t *saved);
+
 /* Height above the ground (mm) from the altitude source (0 = GNSS,
    1 = barometer). Without a zero, the height is the GNSS altitude
    above dz_elev. */
