@@ -100,5 +100,6 @@ Notes:
 - RAM keeps the zero in sleep mode. A reset clears it.
 - With a GNSS zero, the firmware ignores `DZ_Elev`.
 - With `Alt_Source: 1` and a barometer zero, the height is the standard-atmosphere altitude difference between the current pressure and the ground pressure.
+- The air flow in freefall gives barometer noise of approximately 10 m. A filter removes this noise. At each GNSS measurement, the filter moves the altitude with the vertical speed (GNSS, or barometer without a fix). Then it moves the altitude a part of the distance to the new barometer value (time constant 1 s). Thus the height has no delay, and the alarms, windows, and altitude calls do not repeat.
 - With the barometer height, the alarms, the windows, the altitude calls, and the spoken altitude work also without a GNSS fix. Then the barometer gives the vertical speed for `V_Thresh`, and `H_Thresh` is not used. The speech list speaks only its altitude items, and the tone is off.
 - With `Alt_Zero: 1`, the firmware sets the zero again after 1 minute with no movement in active mode. "No movement" is a ground speed and a vertical speed below 0.5 m/s.

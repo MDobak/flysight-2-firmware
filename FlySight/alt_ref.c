@@ -38,6 +38,8 @@
 #define ITOW_WEEK         604800000UL
 #define MAX_BARO_AGE      10     /* GNSS measurements with no barometer data */
 #define VEL_ALPHA         0.3f   /* Filter for the barometer vertical speed */
+#define ALT_TAU_MSEC      1000   /* Time constant of the barometer height filter */
+#define ALT_MAX_STEP_MSEC 1000   /* A longer time between measurements starts the filter again */
 
 static FS_AltRef_Zero_t zero = { 0, 0, 0 };
 static uint32_t epoch;
@@ -52,6 +54,14 @@ static float prevBaroAlt;
 static uint64_t prevBaroTime;
 static bool hasPrevBaro;
 static float baroVelD;
+
+/* Barometer altitude (standard atmosphere, m). The air flow in freefall
+   gives noise of about 10 m in each measurement. The filter moves the
+   altitude with the vertical speed between two measurements, then a part
+   of the distance to the new barometer value. Thus it has no delay. */
+static float baroAlt;
+static bool hasBaroAlt;
+static uint32_t altITOW;
 
 /* Latest values */
 static int32_t pressure;
@@ -84,9 +94,41 @@ void FS_AltRef_Start(void)
 	pressureAge = 255;
 	hasPrevBaro = false;
 	baroVelD = 0;
+	hasBaroAlt = false;
 	countH = 0;
 	countP = 0;
 	still = false;
+}
+
+/* Update the barometer altitude filter at each GNSS measurement. newBaro is
+   true if there is a new pressure. */
+static void updateBaroAlt(const FS_GNSS_Data_t *data, bool newBaro)
+{
+	const uint32_t dt = (data->iTOW + ITOW_WEEK - altITOW) % ITOW_WEEK;
+	const float raw = pressureAltitude(pressure);
+
+	if (hasBaroAlt && (dt == 0)) return;
+	altITOW = data->iTOW;
+
+	if (!hasBaroAlt || (dt > ALT_MAX_STEP_MSEC))
+	{
+		/* Start again with the last pressure */
+		if (newBaro || hasBaroAlt)
+		{
+			baroAlt = raw;
+			hasBaroAlt = true;
+		}
+		return;
+	}
+
+	/* Vertical speed (m/s, down) from the GNSS, or from the barometer */
+	const float velD = (data->gpsFix == 3) ? data->velD / 1000.0f : baroVelD;
+	baroAlt -= velD * dt / 1000.0f;
+
+	if (newBaro)
+	{
+		baroAlt += (raw - baroAlt) * dt / (float) (ALT_TAU_MSEC + dt);
+	}
 }
 
 void FS_AltRef_UpdateBaro(int32_t p, uint64_t time)
@@ -139,8 +181,11 @@ void FS_AltRef_UpdateGNSS(const FS_GNSS_Data_t *data, bool auto_zero)
 		{
 			hasPrevBaro = false;
 			baroVelD = 0;
+			hasBaroAlt = false;
 		}
 	}
+
+	updateBaroAlt(data, count > 0);
 
 	goodH = (data->gpsFix == 3) && (data->vAcc < GOOD_V_ACC);
 	if (goodH)
@@ -270,8 +315,8 @@ int32_t FS_AltRef_Height(const FS_GNSS_Data_t *data, uint8_t source, int32_t dz_
 	if (FS_AltRef_UsesBaro(source))
 	{
 		k = FS_ALT_REF_KIND_BARO;
-		h = (int32_t) ((pressureAltitude(pressure) -
-				pressureAltitude(zero.ground_pressure)) * 1000.0f);
+		const float alt = hasBaroAlt ? baroAlt : pressureAltitude(pressure);
+		h = (int32_t) ((alt - pressureAltitude(zero.ground_pressure)) * 1000.0f);
 	}
 	else if (zero.flags & FS_ALT_REF_GNSS)
 	{
