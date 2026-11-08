@@ -31,6 +31,8 @@
 #define VBAT_TIMER_MSEC     1000
 #define VBAT_TIMER_TICKS    (VBAT_TIMER_MSEC*1000/CFG_TS_TICK_VAL)
 
+#define VBAT_POLL_TIMEOUT_MSEC 10
+
 /* Value of analog reference voltage (Vref+), connected to analog voltage   */
 /* supply Vdda (unit: mV).                                                  */
 #define VDDA_APPLI                       ((uint32_t)3300)
@@ -122,6 +124,53 @@ void FS_VBAT_ConversionComplete(void)
 const FS_VBAT_Data_t *FS_VBAT_GetData(void)
 {
 	return &vbatData;
+}
+
+bool FS_VBAT_Measure(uint16_t *voltage)
+{
+	HAL_StatusTypeDef status;
+	uint32_t raw = 0;
+
+	// Active mode owns the ADC when it is initialized
+	if (HAL_ADC_GetState(&hadc1) != HAL_ADC_STATE_RESET)
+	{
+		return false;
+	}
+
+	MX_ADC1_Init();
+
+	if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
+	{
+		HAL_ADC_DeInit(&hadc1);
+		return false;
+	}
+
+	// Enable battery measurement
+	HAL_GPIO_WritePin(VBAT_EN_GPIO_Port, VBAT_EN_Pin, GPIO_PIN_SET);
+
+	// Do one conversion without interrupts
+	status = HAL_ADC_Start(&hadc1);
+	if (status == HAL_OK)
+	{
+		status = HAL_ADC_PollForConversion(&hadc1, VBAT_POLL_TIMEOUT_MSEC);
+	}
+	if (status == HAL_OK)
+	{
+		raw = HAL_ADC_GetValue(&hadc1);
+	}
+	HAL_ADC_Stop(&hadc1);
+
+	// Disable battery measurement
+	HAL_GPIO_WritePin(VBAT_EN_GPIO_Port, VBAT_EN_Pin, GPIO_PIN_RESET);
+
+	HAL_ADC_DeInit(&hadc1);
+
+	if (status == HAL_OK)
+	{
+		*voltage = __ADC_CALC_DATA_VOLTAGE(VDDA_APPLI, raw * 2);
+	}
+
+	return status == HAL_OK;
 }
 
 __weak void FS_VBAT_ValueReady_Callback(void)

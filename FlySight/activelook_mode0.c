@@ -61,7 +61,6 @@ typedef struct {
 #define METERS_TO_FEET      3.28084
 
 // Minimum announced altitude (mm)
-#define ALT_MIN_MM (1500L * 1000L)
 
 // Minimum filtered ground speed for altitude at destination (m/s)
 #define ALTW_MIN_GSPEED 2.0
@@ -706,18 +705,6 @@ void FS_ActiveLook_Mode0_Update(void)
         const AL_Mode0_LineMap_t* mapEntry = FindLineMapEntry(s_lineSpecs[i].typeId);
 
         if (mapEntry && mapEntry->fn) {
-            // 1. If nav is disabled but line is a navigation mode, mark it invalid
-            //    so we display "----"
-            if (!cfg->enable_nav &&
-               (mapEntry->typeId == FS_CONFIG_MODE_DIRECTION_TO_DESTINATION ||
-                mapEntry->typeId == FS_CONFIG_MODE_DISTANCE_TO_DESTINATION ||
-                mapEntry->typeId == FS_CONFIG_MODE_DIRECTION_TO_BEARING ||
-                mapEntry->typeId == FS_CONFIG_MODE_LEFT_RIGHT ||
-                mapEntry->typeId == FS_CONFIG_MODE_ALTITUDE_AT_DESTINATION))
-            {
-                display_invalid = true;
-            }
-
             // 2. Get base value if not invalid
             if (!display_invalid) {
                 baseVal = mapEntry->fn(gnss);
@@ -726,13 +713,6 @@ void FS_ActiveLook_Mode0_Update(void)
             // 3. Check validity limits
             if (!display_invalid && gnss->gpsFix != 3) {
                 display_invalid = true;
-            }
-
-            // Check ALT_MIN for Altitude display
-            if (!display_invalid && mapEntry->typeId == FS_CONFIG_MODE_ALTITUDE) {
-                if (altitude_agl_mm < ALT_MIN_MM) {
-                    display_invalid = true;
-                }
             }
 
             // Check glide slope filter for altitude at destination

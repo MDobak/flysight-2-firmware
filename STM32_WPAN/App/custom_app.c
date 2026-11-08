@@ -32,6 +32,7 @@
 #include "crs.h"
 #include "start_control.h"
 #include "gnss_ble.h"
+#include "sensor_ble.h"
 #include "mode.h"
 #include "ble_tx_queue.h"
 #include "sensor_data.h"
@@ -47,6 +48,7 @@ typedef struct
   /* Sensor_Data */
   uint8_t               Sd_gnss_measurement_Notification_Status;
   uint8_t               Sd_control_point_Indication_Status;
+  uint8_t               Sd_sensor_measurement_Notification_Status;
   /* Starter_Pistol */
   uint8_t               Sp_control_point_Indication_Status;
   uint8_t               Sp_result_Indication_Status;
@@ -96,6 +98,7 @@ static Custom_CRS_Packet_t rx_buffer[FS_CRS_WINDOW_LENGTH+1];
 static uint32_t rx_read_index, rx_write_index;
 
 static uint8_t gnss_pv_packet[GNSS_BLE_MAX_LEN];
+static uint8_t sensor_packet[SENSOR_BLE_MAX_LEN];
 
 static uint8_t start_result_packet[9];
 
@@ -103,6 +106,7 @@ static uint8_t connected_flag = 0;
 
 extern uint8_t SizeSd_Gnss_Measurement;
 extern uint8_t SizeSd_Control_Point;
+extern uint8_t SizeSd_Sensor_Measurement;
 
 static uint8_t timeout_timer_id;
 
@@ -137,6 +141,8 @@ static void Custom_CRS_OnConnect(Custom_App_ConnHandle_Not_evt_t *pNotification)
 static void Custom_CRS_OnDisconnect(void);
 static void Custom_CRS_OnRxWrite(Custom_STM_App_Notification_evt_t *pNotification);
 static void Custom_App_Timeout(void);
+static void Custom_VBAT_Refresh(void);
+static void Custom_Sensor_Task(void);
 /* USER CODE END PFP */
 
 /* Functions Definition ------------------------------------------------------*/
@@ -218,6 +224,20 @@ void Custom_STM_App_Notification(Custom_STM_App_Notification_evt_t *pNotificatio
       /* USER CODE BEGIN CUSTOM_STM_SD_CONTROL_POINT_INDICATE_DISABLED_EVT */
       Custom_App_Context.Sd_control_point_Indication_Status = 0;
       /* USER CODE END CUSTOM_STM_SD_CONTROL_POINT_INDICATE_DISABLED_EVT */
+      break;
+
+    case CUSTOM_STM_SD_SENSOR_MEASUREMENT_NOTIFY_ENABLED_EVT:
+      /* USER CODE BEGIN CUSTOM_STM_SD_SENSOR_MEASUREMENT_NOTIFY_ENABLED_EVT */
+      Custom_App_Context.Sd_sensor_measurement_Notification_Status = 1;
+      Sensor_BLE_SetEnabled(true);
+      /* USER CODE END CUSTOM_STM_SD_SENSOR_MEASUREMENT_NOTIFY_ENABLED_EVT */
+      break;
+
+    case CUSTOM_STM_SD_SENSOR_MEASUREMENT_NOTIFY_DISABLED_EVT:
+      /* USER CODE BEGIN CUSTOM_STM_SD_SENSOR_MEASUREMENT_NOTIFY_DISABLED_EVT */
+      Custom_App_Context.Sd_sensor_measurement_Notification_Status = 0;
+      Sensor_BLE_SetEnabled(false);
+      /* USER CODE END CUSTOM_STM_SD_SENSOR_MEASUREMENT_NOTIFY_DISABLED_EVT */
       break;
 
     /* Starter_Pistol */
@@ -310,9 +330,8 @@ void Custom_STM_App_Notification(Custom_STM_App_Notification_evt_t *pNotificatio
     case CUSTOM_STM_BATTERY_LEVEL_READ_EVT:
       /* USER CODE BEGIN CUSTOM_STM_BATTERY_LEVEL_READ_EVT */
       APP_DBG_MSG("CUSTOM_STM_BATTERY_LEVEL_READ_EVT received\n");
-      // The actual calculation and update should happen when FS_VBAT_ValueReady_Callback runs,
-      // or we need a way to trigger FS_VBAT_ValueReady_Callback or get the latest value here.
-      // For simplicity, let's assume current_battery_level_percent is up-to-date.
+      // Active mode updates the level each second. In other modes, measure it now.
+      Custom_VBAT_Refresh();
       Custom_STM_App_Update_Char(CUSTOM_STM_BATTERY_LEVEL, &current_battery_level_percent);
       /* USER CODE END CUSTOM_STM_BATTERY_LEVEL_READ_EVT */
       break;
@@ -321,7 +340,8 @@ void Custom_STM_App_Notification(Custom_STM_App_Notification_evt_t *pNotificatio
       /* USER CODE BEGIN CUSTOM_STM_BATTERY_LEVEL_NOTIFY_ENABLED_EVT */
       APP_DBG_MSG("CUSTOM_STM_BATTERY_LEVEL_NOTIFY_ENABLED_EVT received\n");
       Custom_App_Context.Battery_level_Notification_Status = 1;
-      // Optionally, send the current level immediately upon enabling notifications
+      // Send the current level immediately upon enabling notifications
+      Custom_VBAT_Refresh();
       Custom_STM_App_Update_Char(CUSTOM_STM_BATTERY_LEVEL, &current_battery_level_percent);
       /* USER CODE END CUSTOM_STM_BATTERY_LEVEL_NOTIFY_ENABLED_EVT */
       break;
@@ -371,6 +391,16 @@ void Custom_APP_Notification(Custom_App_ConnHandle_Not_evt_t *pNotification)
     case CUSTOM_DISCON_HANDLE_EVT :
       /* USER CODE BEGIN CUSTOM_DISCON_HANDLE_EVT */
       Custom_CRS_OnDisconnect();
+
+      // Stop the live sensor data
+      Custom_App_Context.Sd_sensor_measurement_Notification_Status = 0;
+      Sensor_BLE_SetEnabled(false);
+
+      // Sensor mode is only for a connected client
+      if (FS_Mode_State() == FS_MODE_STATE_SENSOR)
+      {
+        FS_Mode_PushQueue(FS_MODE_EVENT_BLE_DISCONNECTED);
+      }
       /* USER CODE END CUSTOM_DISCON_HANDLE_EVT */
       break;
 
@@ -403,6 +433,9 @@ void Custom_APP_Init(void)
   /* Sensor_Data */
   Custom_App_Context.Sd_gnss_measurement_Notification_Status = 0;
   Custom_App_Context.Sd_control_point_Indication_Status = 0;
+  Custom_App_Context.Sd_sensor_measurement_Notification_Status = 0;
+  Sensor_BLE_SetEnabled(false);
+  UTIL_SEQ_RegTask(1<<CFG_TASK_FS_SENSOR_BLE_ID, UTIL_SEQ_RFU, Custom_Sensor_Task);
 
   /* Starter_Pistol */
   Custom_App_Context.Sp_control_point_Indication_Status = 0;
@@ -848,6 +881,20 @@ void Custom_GNSS_Update(const FS_GNSS_Data_t *current)
   }
 }
 
+static void Custom_Sensor_Task(void)
+{
+  uint8_t length;
+
+  if (!Custom_App_Context.Sd_sensor_measurement_Notification_Status) return;
+
+  length = Sensor_BLE_Build(sensor_packet);
+  if (length > 1)
+  {
+    BLE_TX_Queue_SendTxPacket(CUSTOM_STM_SD_SENSOR_MEASUREMENT,
+        sensor_packet, length, &SizeSd_Sensor_Measurement, 0);
+  }
+}
+
 void Custom_Start_Update(uint16_t year, uint8_t month, uint8_t day,
                          uint8_t hour, uint8_t min, uint8_t sec, uint16_t ms)
 {
@@ -898,6 +945,17 @@ static uint8_t calculate_battery_percentage(uint16_t voltage_mv) {
     percentage = ((int32_t)voltage_mv - MIN_VOLTAGE_MV) * 100 / (MAX_VOLTAGE_MV - MIN_VOLTAGE_MV);
   }
   return (uint8_t)percentage;
+}
+
+static void Custom_VBAT_Refresh(void)
+{
+  uint16_t voltage;
+
+  // Fails in active mode. Then the periodic value is current.
+  if (FS_VBAT_Measure(&voltage))
+  {
+    current_battery_level_percent = calculate_battery_percentage(voltage);
+  }
 }
 
 void Custom_VBAT_Update(const FS_VBAT_Data_t *current)

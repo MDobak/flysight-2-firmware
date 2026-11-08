@@ -34,6 +34,7 @@
 #include "log.h"
 #include "mode.h"
 #include "pairing_mode.h"
+#include "sensor_mode.h"
 #include "start_mode.h"
 #include "state.h"
 #include "stm32_seq.h"
@@ -55,6 +56,7 @@ static FS_Mode_State_t FS_Mode_State_Config(FS_Mode_Event_t event);
 static FS_Mode_State_t FS_Mode_State_USB(FS_Mode_Event_t event);
 static FS_Mode_State_t FS_Mode_State_Pairing(FS_Mode_Event_t event);
 static FS_Mode_State_t FS_Mode_State_Start(FS_Mode_Event_t event);
+static FS_Mode_State_t FS_Mode_State_Sensor(FS_Mode_Event_t event);
 static FS_Mode_State_t FS_Mode_EnterRequestedState(void);
 static void FS_Mode_ClearRequestedState(void);
 static void FS_Mode_ExecutePendingTerminalAction(void);
@@ -67,7 +69,8 @@ static FS_Mode_StateFunc_t *const mode_state_table[FS_MODE_STATE_COUNT] =
 	FS_Mode_State_Config,
 	FS_Mode_State_USB,
 	FS_Mode_State_Pairing,
-	FS_Mode_State_Start
+	FS_Mode_State_Start,
+	FS_Mode_State_Sensor
 };
 
 static FS_Mode_State_t mode_state = FS_MODE_STATE_SLEEP;
@@ -498,6 +501,30 @@ static FS_Mode_State_t FS_Mode_State_Start(FS_Mode_Event_t event)
 	return next_mode;
 }
 
+static FS_Mode_State_t FS_Mode_State_Sensor(FS_Mode_Event_t event)
+{
+	FS_Mode_State_t next_mode = FS_MODE_STATE_SENSOR;
+
+	if ((event == FS_MODE_EVENT_BUTTON_PRESSED) ||
+		(event == FS_MODE_EVENT_BLE_DISCONNECTED) ||
+		(event == FS_MODE_EVENT_TERMINAL_ACTION))
+	{
+		FS_SensorMode_DeInit();
+		next_mode = FS_MODE_STATE_SLEEP;
+	}
+	else if (event == FS_MODE_EVENT_REQUEST_STATE)
+	{
+		if (requested_state == FS_MODE_STATE_SLEEP)
+		{
+			FS_SensorMode_DeInit();
+			next_mode = FS_MODE_STATE_SLEEP;
+		}
+		FS_Mode_ClearRequestedState();
+	}
+
+	return next_mode;
+}
+
 static FS_Mode_State_t FS_Mode_EnterRequestedState(void)
 {
 	FS_Mode_State_t next_mode = FS_MODE_STATE_SLEEP;
@@ -531,6 +558,11 @@ static FS_Mode_State_t FS_Mode_EnterRequestedState(void)
 	case FS_MODE_STATE_START:
 		FS_StartMode_Init();
 		next_mode = FS_MODE_STATE_START;
+		break;
+
+	case FS_MODE_STATE_SENSOR:
+		FS_SensorMode_Init();
+		next_mode = FS_MODE_STATE_SENSOR;
 		break;
 
 	default:

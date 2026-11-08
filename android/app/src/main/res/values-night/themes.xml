@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <!-- Each screen draws its own top bar. -->
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:colorAccent">@android:color/system_accent1_200</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

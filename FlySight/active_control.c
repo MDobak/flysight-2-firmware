@@ -25,6 +25,7 @@
 
 #include "main.h"
 #include "activelook.h"
+#include "alt_ref.h"
 #include "app_common.h"
 #include "audio_control.h"
 #include "baro.h"
@@ -37,6 +38,7 @@
 #include "led.h"
 #include "log.h"
 #include "mag.h"
+#include "sensor_ble.h"
 #include "state.h"
 #include "rtc_util.h"
 #include "time.h"
@@ -117,9 +119,16 @@ void FS_ActiveControl_DeInit(void)
 
 void FS_Baro_DataReady_Callback(void)
 {
+	// Live sensor data over BLE (also in sensor mode)
+	Sensor_BLE_DataReady();
+
+	// Altitude reference (also in sensor mode)
+	FS_AltRef_UpdateBaro(FS_Baro_GetData()->pressure, FS_Baro_GetData()->time);
+
 	if (state != FS_CONTROL_ACTIVE) return;
 
-	if (FS_Config_Get()->enable_logging)
+	// The barometer can be on only for the altitude source
+	if (FS_Config_Get()->enable_logging && FS_Config_Get()->enable_baro)
 	{
 		// Save to log file
 		FS_Log_WriteBaroData(FS_Baro_GetData());
@@ -128,6 +137,9 @@ void FS_Baro_DataReady_Callback(void)
 
 void FS_Hum_DataReady_Callback(void)
 {
+	// Live sensor data over BLE (also in sensor mode)
+	Sensor_BLE_DataReady();
+
 	if (state != FS_CONTROL_ACTIVE) return;
 
 	if (FS_Config_Get()->enable_logging)
@@ -139,6 +151,9 @@ void FS_Hum_DataReady_Callback(void)
 
 void FS_Mag_DataReady_Callback(void)
 {
+	// Live sensor data over BLE (also in sensor mode)
+	Sensor_BLE_DataReady();
+
 	if (state != FS_CONTROL_ACTIVE) return;
 
 	if (FS_Config_Get()->enable_logging)
@@ -153,6 +168,9 @@ void FS_ActiveControl_DataReady_Callback(void)
 	const FS_GNSS_Data_t *data = FS_GNSS_GetData();
 
 	if (state != FS_CONTROL_ACTIVE) return;
+
+	// Update the altitude reference before the audio uses it
+	FS_AltRef_UpdateGNSS(data, FS_Config_Get()->alt_zero != 0);
 
 	if (FS_Config_Get()->enable_audio)
 	{
@@ -226,6 +244,9 @@ void FS_ActiveControl_RawReady_Callback(void)
 
 void FS_IMU_DataReady_Callback(void)
 {
+	// Live sensor data over BLE (also in sensor mode)
+	Sensor_BLE_DataReady();
+
 	if (state != FS_CONTROL_ACTIVE) return;
 
 	if (FS_Config_Get()->enable_logging)
@@ -237,6 +258,9 @@ void FS_IMU_DataReady_Callback(void)
 
 void FS_VBAT_ValueReady_Callback(void)
 {
+	// Live sensor data over BLE (also in sensor mode)
+	Sensor_BLE_DataReady();
+
 	if (state != FS_CONTROL_ACTIVE) return;
 
 	const FS_VBAT_Data_t *vbat_data = FS_VBAT_GetData();

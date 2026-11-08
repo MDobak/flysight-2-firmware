@@ -64,6 +64,9 @@
 #define FS_CONFIG_UNITS_FEET    1
 #define FS_CONFIG_UNITS_NM      2
 
+#define FS_CONFIG_ALT_FORMAT_FULL   0
+#define FS_CONFIG_ALT_FORMAT_SHORT  1
+
 typedef enum {
     FS_UNIT_SYSTEM_METRIC = 0,
     FS_UNIT_SYSTEM_IMPERIAL = 1
@@ -135,12 +138,15 @@ typedef struct
 	int32_t  alarm_window_above;
 	int32_t  alarm_window_below;
 	int32_t  dz_elev;
+	uint8_t  alt_source;
+	uint8_t  alt_zero;
 
 	FS_Config_Alarm_t alarms[FS_CONFIG_MAX_ALARMS];
 	uint8_t  num_alarms;
 
 	uint8_t  alt_units;
 	int32_t  alt_step;
+	uint8_t  alt_format;
 
 	FS_Config_Window_t windows[FS_CONFIG_MAX_WINDOWS];
 	uint8_t  num_windows;
@@ -154,7 +160,6 @@ typedef struct
 	uint8_t  enable_baro;
 	uint8_t  enable_hum;
 	uint8_t  enable_mag;
-	uint8_t  ble_tx_power;
 	uint8_t  enable_raw;
 	uint8_t  cold_start;
 
@@ -182,7 +187,6 @@ typedef struct
 	uint8_t  num_al_lines;
 
 	// Flag to control whether navigation modes are allowed
-	uint8_t  enable_nav;
 } FS_Config_Data_t;
 
 typedef enum {

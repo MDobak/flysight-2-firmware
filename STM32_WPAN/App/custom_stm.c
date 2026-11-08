@@ -34,6 +34,7 @@ typedef struct{
   uint16_t  CustomSensor_DataHdle;                    /**< Sensor_Data handle */
   uint16_t  CustomSd_Gnss_MeasurementHdle;                  /**< SD_GNSS_Measurement handle */
   uint16_t  CustomSd_Control_PointHdle;                  /**< SD_Control_Point handle */
+  uint16_t  CustomSd_Sensor_MeasurementHdle;                  /**< SD_Sensor_Measurement handle */
   uint16_t  CustomStarter_PistolHdle;                    /**< Starter_Pistol handle */
   uint16_t  CustomSp_Control_PointHdle;                  /**< SP_Control_Point handle */
   uint16_t  CustomSp_ResultHdle;                  /**< SP_Result handle */
@@ -79,6 +80,7 @@ uint8_t SizeFt_Packet_Out = 244;
 uint8_t SizeFt_Packet_In = 244;
 uint8_t SizeSd_Gnss_Measurement = 44;
 uint8_t SizeSd_Control_Point = 20;
+uint8_t SizeSd_Sensor_Measurement = 47;
 uint8_t SizeSp_Control_Point = 20;
 uint8_t SizeSp_Result = 9;
 uint8_t SizeDs_Mode = 1;
@@ -153,6 +155,7 @@ do {\
 #define COPY_SENSOR_DATA_UUID(uuid_struct)          COPY_UUID_128(uuid_struct,0x00,0x00,0x00,0x01,0xcc,0x7a,0x48,0x2a,0x98,0x4a,0x7f,0x2e,0xd5,0xb3,0xe5,0x8f)
 #define COPY_SD_GNSS_MEASUREMENT_UUID(uuid_struct)    COPY_UUID_128(uuid_struct,0x00,0x00,0x00,0x00,0x8e,0x22,0x45,0x41,0x9d,0x4c,0x21,0xed,0xae,0x82,0xed,0x19)
 #define COPY_SD_CONTROL_POINT_UUID(uuid_struct)    COPY_UUID_128(uuid_struct,0x00,0x00,0x00,0x06,0x8e,0x22,0x45,0x41,0x9d,0x4c,0x21,0xed,0xae,0x82,0xed,0x19)
+#define COPY_SD_SENSOR_MEASUREMENT_UUID(uuid_struct)    COPY_UUID_128(uuid_struct,0x00,0x00,0x00,0x08,0x8e,0x22,0x45,0x41,0x9d,0x4c,0x21,0xed,0xae,0x82,0xed,0x19)
 #define COPY_STARTER_PISTOL_UUID(uuid_struct)          COPY_UUID_128(uuid_struct,0x00,0x00,0x00,0x02,0xcc,0x7a,0x48,0x2a,0x98,0x4a,0x7f,0x2e,0xd5,0xb3,0xe5,0x8f)
 #define COPY_SP_CONTROL_POINT_UUID(uuid_struct)    COPY_UUID_128(uuid_struct,0x00,0x00,0x00,0x03,0x8e,0x22,0x45,0x41,0x9d,0x4c,0x21,0xed,0xae,0x82,0xed,0x19)
 #define COPY_SP_RESULT_UUID(uuid_struct)    COPY_UUID_128(uuid_struct,0x00,0x00,0x00,0x04,0x8e,0x22,0x45,0x41,0x9d,0x4c,0x21,0xed,0xae,0x82,0xed,0x19)
@@ -328,6 +331,50 @@ static SVCCTL_EvtAckStatus_t Custom_STM_Event_Handler(void *Event)
               break;
             }
           }  /* if (attribute_modified->Attr_Handle == (CustomContext.CustomSD_Control_PointHdle + CHARACTERISTIC_DESCRIPTOR_ATTRIBUTE_OFFSET))*/
+
+          else if (attribute_modified->Attr_Handle == (CustomContext.CustomSd_Sensor_MeasurementHdle + CHARACTERISTIC_DESCRIPTOR_ATTRIBUTE_OFFSET))
+          {
+            return_value = SVCCTL_EvtAckFlowEnable;
+            /* USER CODE BEGIN CUSTOM_STM_Service_2_Char_3 */
+
+            /* USER CODE END CUSTOM_STM_Service_2_Char_3 */
+            switch (attribute_modified->Attr_Data[0])
+            {
+              /* USER CODE BEGIN CUSTOM_STM_Service_2_Char_3_attribute_modified */
+
+              /* USER CODE END CUSTOM_STM_Service_2_Char_3_attribute_modified */
+
+              /* Disabled Notification management */
+              case (!(COMSVC_Notification)):
+                /* USER CODE BEGIN CUSTOM_STM_Service_2_Char_3_Disabled_BEGIN */
+
+                /* USER CODE END CUSTOM_STM_Service_2_Char_3_Disabled_BEGIN */
+                Notification.Custom_Evt_Opcode = CUSTOM_STM_SD_SENSOR_MEASUREMENT_NOTIFY_DISABLED_EVT;
+                Custom_STM_App_Notification(&Notification);
+                /* USER CODE BEGIN CUSTOM_STM_Service_2_Char_3_Disabled_END */
+
+                /* USER CODE END CUSTOM_STM_Service_2_Char_3_Disabled_END */
+                break;
+
+              /* Enabled Notification management */
+              case COMSVC_Notification:
+                /* USER CODE BEGIN CUSTOM_STM_Service_2_Char_3_COMSVC_Notification_BEGIN */
+
+                /* USER CODE END CUSTOM_STM_Service_2_Char_3_COMSVC_Notification_BEGIN */
+                Notification.Custom_Evt_Opcode = CUSTOM_STM_SD_SENSOR_MEASUREMENT_NOTIFY_ENABLED_EVT;
+                Custom_STM_App_Notification(&Notification);
+                /* USER CODE BEGIN CUSTOM_STM_Service_2_Char_3_COMSVC_Notification_END */
+
+                /* USER CODE END CUSTOM_STM_Service_2_Char_3_COMSVC_Notification_END */
+                break;
+
+              default:
+                /* USER CODE BEGIN CUSTOM_STM_Service_2_Char_3_default */
+
+                /* USER CODE END CUSTOM_STM_Service_2_Char_3_default */
+              break;
+            }
+          }  /* if (attribute_modified->Attr_Handle == (CustomContext.CustomSd_Sensor_MeasurementHdle + CHARACTERISTIC_DESCRIPTOR_ATTRIBUTE_OFFSET))*/
 
           else if (attribute_modified->Attr_Handle == (CustomContext.CustomSp_Control_PointHdle + CHARACTERISTIC_DESCRIPTOR_ATTRIBUTE_OFFSET))
           {
@@ -833,12 +880,14 @@ void SVCCTL_InitCustomSvc(void)
    *                                2 for SD_Control_Point +
    *                                1 for SD_GNSS_Measurement configuration descriptor +
    *                                1 for SD_Control_Point configuration descriptor +
-   *                              = 7
+   *                                2 for SD_Sensor_Measurement +
+   *                                1 for SD_Sensor_Measurement configuration descriptor +
+   *                              = 10
    *
    * This value doesn't take into account number of descriptors manually added
    * In case of descriptors added, please update the max_attr_record value accordingly in the next SVCCTL_InitService User Section
    */
-  max_attr_record = 7;
+  max_attr_record = 10;
 
   /* USER CODE BEGIN SVCCTL_InitService */
   /* max_attr_record to be updated if descriptors have been added */
@@ -912,6 +961,32 @@ void SVCCTL_InitCustomSvc(void)
   /* Place holder for Characteristic Descriptors */
 
   /* USER CODE END SVCCTL_Init_Service2_Char2 */
+  /**
+   *  SD_Sensor_Measurement
+   */
+  COPY_SD_SENSOR_MEASUREMENT_UUID(uuid.Char_UUID_128);
+  ret = aci_gatt_add_char(CustomContext.CustomSensor_DataHdle,
+                          UUID_TYPE_128, &uuid,
+                          SizeSd_Sensor_Measurement,
+                          CHAR_PROP_NOTIFY,
+                          ATTR_PERMISSION_ENCRY_READ | ATTR_PERMISSION_ENCRY_WRITE,
+                          GATT_DONT_NOTIFY_EVENTS,
+                          0x10,
+                          CHAR_VALUE_LEN_VARIABLE,
+                          &(CustomContext.CustomSd_Sensor_MeasurementHdle));
+  if (ret != BLE_STATUS_SUCCESS)
+  {
+    APP_DBG_MSG("  Fail   : aci_gatt_add_char command   : SD_SENSOR_MEASUREMENT, error code: 0x%x \n\r", ret);
+  }
+  else
+  {
+    APP_DBG_MSG("  Success: aci_gatt_add_char command   : SD_SENSOR_MEASUREMENT \n\r");
+  }
+
+  /* USER CODE BEGIN SVCCTL_Init_Service2_Char3/ */
+  /* Place holder for Characteristic Descriptors */
+
+  /* USER CODE END SVCCTL_Init_Service2_Char3 */
 
   /**
    *          Starter_Pistol
@@ -1249,6 +1324,25 @@ tBleStatus Custom_STM_App_Update_Char(Custom_STM_Char_Opcode_t CharOpcode, uint8
       /* USER CODE BEGIN CUSTOM_STM_App_Update_Service_2_Char_2*/
 
       /* USER CODE END CUSTOM_STM_App_Update_Service_2_Char_2*/
+      break;
+
+    case CUSTOM_STM_SD_SENSOR_MEASUREMENT:
+      ret = aci_gatt_update_char_value(CustomContext.CustomSensor_DataHdle,
+                                       CustomContext.CustomSd_Sensor_MeasurementHdle,
+                                       0, /* charValOffset */
+                                       SizeSd_Sensor_Measurement, /* charValueLen */
+                                       (uint8_t *)  pPayload);
+      if (ret != BLE_STATUS_SUCCESS)
+      {
+        APP_DBG_MSG("  Fail   : aci_gatt_update_char_value SD_SENSOR_MEASUREMENT command, result : 0x%x \n\r", ret);
+      }
+      else
+      {
+        APP_DBG_MSG("  Success: aci_gatt_update_char_value SD_SENSOR_MEASUREMENT command\n\r");
+      }
+      /* USER CODE BEGIN CUSTOM_STM_App_Update_Service_2_Char_3*/
+
+      /* USER CODE END CUSTOM_STM_App_Update_Service_2_Char_3*/
       break;
 
     case CUSTOM_STM_SP_CONTROL_POINT:

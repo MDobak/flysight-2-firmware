@@ -24,6 +24,9 @@
 #ifndef VBAT_H_
 #define VBAT_H_
 
+#include <stdbool.h>
+#include <stdint.h>
+
 typedef struct
 {
 	uint64_t time;		// us
@@ -36,6 +39,10 @@ void FS_VBAT_DeInit(void);
 void FS_VBAT_ConversionComplete(void);
 
 const FS_VBAT_Data_t *FS_VBAT_GetData(void);
+
+/* Measure the battery voltage one time (unit: mV). Returns false if the
+   measurement failed, or if active mode uses the ADC. */
+bool FS_VBAT_Measure(uint16_t *voltage);
 void FS_VBAT_ValueReady_Callback(void);
 
 #endif /* VBAT_H_ */

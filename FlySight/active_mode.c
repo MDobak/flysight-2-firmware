@@ -22,6 +22,7 @@
 ****************************************************************************/
 
 #include "main.h"
+#include "alt_ref.h"
 #include "active_control.h"
 #include "activelook.h"
 #include "app_common.h"
@@ -43,6 +44,12 @@
 
 extern UART_HandleTypeDef huart1;
 extern ADC_HandleTypeDef hadc1;
+
+/* The barometer is on for the log or for the altitude source */
+static bool baroOn(void)
+{
+	return FS_Config_Get()->enable_baro || (FS_Config_Get()->alt_source == 1);
+}
 
 void FS_ActiveMode_Init(void)
 {
@@ -147,6 +154,9 @@ void FS_ActiveMode_Init(void)
 		HAL_GPIO_WritePin(MIC_EN_GPIO_Port, MIC_EN_Pin, GPIO_PIN_SET);
 	}
 
+	/* Altitude reference */
+	FS_AltRef_Start();
+
 	/* Enable USART */
 	MX_USART1_UART_Init();
 
@@ -164,7 +174,7 @@ void FS_ActiveMode_Init(void)
 		FS_GNSS_Stop();
 	}
 
-	if (FS_Config_Get()->enable_baro)
+	if (baroOn())
 	{
 		/* Start barometer */
 		if (FS_Baro_Start() != HAL_OK)
@@ -194,7 +204,7 @@ void FS_ActiveMode_Init(void)
 		}
 	}
 
-	if (FS_Config_Get()->enable_baro || FS_Config_Get()->enable_hum || FS_Config_Get()->enable_mag)
+	if (baroOn() || FS_Config_Get()->enable_hum || FS_Config_Get()->enable_mag)
 	{
 		/* Start reading sensors */
 		FS_Sensor_Start();
@@ -231,7 +241,7 @@ void FS_ActiveMode_DeInit(void)
 		FS_IMU_Stop();
 	}
 
-	if (FS_Config_Get()->enable_baro || FS_Config_Get()->enable_hum || FS_Config_Get()->enable_mag)
+	if (baroOn() || FS_Config_Get()->enable_hum || FS_Config_Get()->enable_mag)
 	{
 		/* Stop reading sensors */
 		FS_Sensor_Stop();
@@ -249,7 +259,7 @@ void FS_ActiveMode_DeInit(void)
 		FS_Hum_Stop();
 	}
 
-	if (FS_Config_Get()->enable_baro)
+	if (baroOn())
 	{
 		/* Stop barometer */
 		FS_Baro_Stop();

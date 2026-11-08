@@ -170,6 +170,12 @@ static const char defaultConfig[] =
 		"Win_Above:     0 ; Window above each alarm (m)\n"
 		"Win_Below:     0 ; Window below each alarm (m)\n"
 		"DZ_Elev:       0 ; Ground elevation (m above sea level)\n"
+		"Alt_Source:    0 ; Altitude for alarms, windows and calls\n"
+		"                 ;   0 = GNSS\n"
+		"                 ;   1 = Barometer\n"
+		"Alt_Zero:      0 ; Set the ground level automatically\n"
+		"                 ;   0 = Off (use DZ_Elev)\n"
+		"                 ;   1 = After 1 minute with no movement\n"
 		"\n"
 		"Alarm_Elev:    0 ; Alarm elevation (m above ground level)\n"
 		"Alarm_Type:    0 ; Alarm type\n"
@@ -190,15 +196,17 @@ static const char defaultConfig[] =
 		";          UNDER NO CIRCUMSTANCES SHOULD ALTITUDE MODE BE\n"
 		";          USED TO INDICATE DEPLOYMENT OR BREAKOFF ALTITUDE.\n"
 		"\n"
-		"; NOTE:    Altitude is given relative to ground elevation,\n"
-		";          which is specified in DZ_Elev. Altitude mode will\n"
-		";          not function below 1500 m above ground.\n"
+		"; NOTE:    Altitude is given relative to the ground level\n"
+		";          (Alt_Zero, or DZ_Elev without a ground level).\n"
 		"\n"
 		"Alt_Units:     1 ; Altitude units\n"
 		"                 ;   0 = m\n"
 		"                 ;   1 = ft\n"
 		"Alt_Step:      0 ; Altitude between announcements\n"
 		"                 ;   0 = No altitude\n"
+		"Alt_Format:    0 ; How the altitude is spoken\n"
+		"                 ;   0 = Full (2500 = two thousand five hundred)\n"
+		"                 ;   1 = Short (2500 = 2 5, below 1000 full)\n"
 		"\n"
 		"; Silence windows\n"
 		"\n"
@@ -212,33 +220,8 @@ static const char defaultConfig[] =
 		"\n"
 		"; Navigation settings\n"
 		"\n"
-		"; Activating navigation features requires the UNIQUE DEVICE ID\n"
-		"; of this specific FlySight device to be entered below. This is\n"
-		"; a deliberate step to ensure users understand the potential\n"
-		"; implications of using navigation features.\n"
-		"\n"
-		"; BEFORE ENABLING THIS FEATURE, YOU MUST ACKNOWLEDGE THE\n"
-		"; FOLLOWING:\n"
-		"\n"
-		"; 1. NAVIGATION DATA IS FOR SUPPLEMENTARY INFORMATION ONLY. It\n"
-		";    should NEVER be your primary source of navigation or\n"
-		";    situational awareness.\n"
-		"\n"
-		"; 2. DO NOT USE THIS FEATURE FOR SAFETY-CRITICAL DECISIONS.\n"
-		";    Always prioritize visual confirmation, established safety\n"
-		";    procedures, and communication.\n"
-		"\n"
-		"; 3. Be aware that other users may independently configure\n"
-		";    similar navigation targets, potentially leading to\n"
-		";    convergent flight paths. This system provides NO collision\n"
-		";    avoidance.\n"
-		"\n"
-		"; 4. You are solely responsible for your flight path and safety.\n"
-		"\n"
-		"; ENTER YOUR FLYSIGHT'S UNIQUE DEVICE ID BELOW TO ACTIVATE\n"
-		"; NAVIGATION FEATURES:\n"
-		"\n"
-		"Device_ID: 000000000000000000000000\n"
+		"; Navigation is available on all FlySight devices. It is active\n"
+		"; when a tone, speech or ActiveLook mode uses a navigation value.\n"
 		"\n"
 		"Lat:       510442700    ; Latitude (deg * 10,000,000)\n"
 		"Lon:       -1140620190  ; Longitude (deg * 10,000,000)\n"
@@ -323,11 +306,14 @@ void FS_Config_Init(void)
 	config.alarm_window_above = 0;
 	config.alarm_window_below = 0;
 	config.dz_elev       = 0;
+	config.alt_source    = 0;
+	config.alt_zero      = 0;
 
 	config.num_alarms    = 0;
 
 	config.alt_units     = FS_CONFIG_UNITS_FEET;
 	config.alt_step      = 0;
+	config.alt_format    = FS_CONFIG_ALT_FORMAT_FULL;
 
 	config.num_windows   = 0;
 
@@ -340,7 +326,6 @@ void FS_Config_Init(void)
 	config.enable_baro    = 1;
 	config.enable_hum     = 1;
 	config.enable_mag     = 1;
-	config.ble_tx_power   = 25;
 	config.enable_raw     = 1;
 	config.cold_start     = 0;
 
@@ -364,19 +349,6 @@ void FS_Config_Init(void)
 	config.al_rate        = 1000;
 	config.altw_tau       = 10;
 	config.num_al_lines   = 0;
-
-	// IMPORTANT: Navigation disabled by default
-	config.enable_nav     = 0;
-}
-
-static void FS_Config_WriteHex_32(char *result, const uint32_t *data, uint32_t count)
-{
-	uint32_t i;
-
-	for (i = 0; i < count; ++i)
-	{
-		sprintf(result + 8 * i, "%08lx", data[i]);
-	}
 }
 
 FS_Config_Result_t FS_Config_Read(const char *filename)
@@ -434,10 +406,13 @@ FS_Config_Result_t FS_Config_Read(const char *filename)
 		HANDLE_VALUE("Win_Above", config.alarm_window_above, val * 1000, TRUE);
 		HANDLE_VALUE("Win_Below", config.alarm_window_below, val * 1000, TRUE);
 		HANDLE_VALUE("DZ_Elev",   config.dz_elev,      val * 1000, TRUE);
+		HANDLE_VALUE("Alt_Source", config.alt_source,  val, val == 0 || val == 1);
+		HANDLE_VALUE("Alt_Zero",  config.alt_zero,     val, val == 0 || val == 1);
 		HANDLE_VALUE("TZ_Offset", config.tz_offset,    val, TRUE);
 		HANDLE_VALUE("Init_Mode", config.init_mode,    val, val >= 0 && val <= 2);
 		HANDLE_VALUE("Alt_Units", config.alt_units,    val, val >= 0 && val <= 1);
 		HANDLE_VALUE("Alt_Step",  config.alt_step,     val, val >= 0);
+		HANDLE_VALUE("Alt_Format", config.alt_format,  val, val == 0 || val == 1);
 
 		HANDLE_VALUE("Enable_Audio",   config.enable_audio,   val, val == 0 || val == 1);
 		HANDLE_VALUE("Enable_Logging", config.enable_logging, val, val == 0 || val == 1);
@@ -448,7 +423,6 @@ FS_Config_Result_t FS_Config_Read(const char *filename)
 		HANDLE_VALUE("Enable_Baro",    config.enable_baro,    val, val == 0 || val == 1);
 		HANDLE_VALUE("Enable_Hum",     config.enable_hum,     val, val == 0 || val == 1);
 		HANDLE_VALUE("Enable_Mag",     config.enable_mag,     val, val == 0 || val == 1);
-		HANDLE_VALUE("Ble_Tx_Power",   config.ble_tx_power,   val, val >= 0 && val <= 31);
 		HANDLE_VALUE("Enable_Raw",     config.enable_raw,     val, val == 0 || val == 1);
 		HANDLE_VALUE("Cold_Start",     config.cold_start,     val, val == 0 || val == 1);
 
@@ -567,21 +541,6 @@ FS_Config_Result_t FS_Config_Read(const char *filename)
 		{
 			result[6] = '\0';
 			strncpy(config.al_id, result, sizeof(config.al_id));
-		}
-
-		// Compare config Device_ID with actual hardware device ID.
-		// If it matches, enable navigation.
-		if (!strcmp(name, "Device_ID"))
-		{
-			// Build 24-hex-digit string from the hardware ID
-			const uint32_t *hwId = FS_State_Get()->device_id; // 3 x 32-bit
-			char hwIdString[25];  // 24 hex digits + null
-			FS_Config_WriteHex_32(hwIdString, hwId, 3);
-
-			if (!strcmp(result, hwIdString))
-			{
-				config.enable_nav = 1;
-			}
 		}
 	}
 

@@ -75,6 +75,10 @@ The FlySight 2's operational mode affects BLE service availability, primarily du
     *   Real-time data (`SD_GNSS_Measurement`) notifications are available if subscribed.
     *   **File Transfer (File_Transfer service) is UNAVAILABLE.**
     *   Starter Pistol service (`SP_Control_Point`, `SP_Result`) is active.
+*   **Sensor Mode (Pulsing Orange LED):** Live sensor view for a connected app. A central starts it from Idle with `DS_CMD_REQUEST_SENSOR` (`0x15`). There is no button sequence for this mode.
+    *   The FlySight reads `config.txt` and the selected profile, then starts the GNSS, barometer, humidity sensor, magnetometer, IMU, and battery measurement. It starts all sensors, also if the configuration does not log them. It does not record any data.
+    *   Real-time data (`SD_GNSS_Measurement` and `SD_Sensor_Measurement`) notifications are available if subscribed.
+    *   The FlySight goes back to Idle on `DS_CMD_REQUEST_SLEEP`, on a button push, or when the BLE connection closes.
 
 ### Advertising Details
 
@@ -199,7 +203,7 @@ Packets sent over `FT_Packet_In` (WriteWithoutResponse) and received via notific
 
 ### 2. Sensor_Data Service
 
-Provides live GNSS data when FlySight is in Active Mode or Start Mode. Requires bonding.
+Provides live GNSS data when FlySight is in Active Mode, Start Mode, or Sensor Mode, and live data from the other sensors in Active Mode and Sensor Mode. Requires bonding.
 
 *   **Service UUID:** `00000001-cc7a-482a-984a-7f2ed5b3e58f`
 *   **Characteristics:**
@@ -236,6 +240,21 @@ Provides live GNSS data when FlySight is in Active Mode or Start Mode. Requires 
                 *   If `GNSS_BLE_BIT_NUM_SV` is set:
                     *   `numSV` (uint8_t). Number of satellites in solution. (1 byte)
         *   Default Mask: `0xB0` (iTOW, Position, Velocity).
+
+    *   **`SD_Sensor_Measurement` (Barometer, humidity, magnetometer, IMU, battery)**
+        *   UUID: `00000008-8e22-4541-9d4c-21edae82ed19`
+        *   Properties: **Notify**
+        *   Permissions: Encrypted Read/Write required.
+        *   Usage: Sends the newest value of each sensor. The FlySight sends a packet at most every 250 ms, and only when a sensor has a new value. Notifications come in Active Mode and Sensor Mode. In Active Mode, only the sensors that `config.txt` turns on send values.
+        *   Max Length: 47 bytes (`SizeSd_Sensor_Measurement`). The length depends on the mask.
+        *   **Data Format (Variable Length, Little Endian):**
+            *   Byte 0: `mask` (uint8). It shows which sensors have a new value in this packet. The values follow in this order:
+                *   `0x01` Barometer: `pressure` (int32, Pa × 100), `temperature` (int16, °C × 100). (6 bytes)
+                *   `0x02` Humidity: `humidity` (uint16, % × 10), `temperature` (int16, °C × 10). (4 bytes)
+                *   `0x04` Magnetometer: `x`, `y`, `z` (int16, gauss × 1000), `temperature` (int16, °C × 10). (8 bytes)
+                *   `0x08` IMU: `wx`, `wy`, `wz` (int32, °/s × 1000), `ax`, `ay`, `az` (int32, g × 100000), `temperature` (int16, °C × 100). (26 bytes)
+                *   `0x10` Battery: `voltage` (uint16, mV). (2 bytes)
+            *   A sensor that has no new value since the last packet is not in the packet. Keep the last value.
 
     *   **`SD_Control_Point`**
         *   UUID: `00000006-8e22-4541-9d4c-21edae82ed19`
@@ -322,6 +341,7 @@ Provides information about the device's current operational state and allows for
             | `0x03`| USB              | USB Mass Storage mode. No file access.          |
             | `0x04`| PAIRING          | BLE pairing request mode.                       |
             | `0x05`| START            | Starter pistol mode. No file access.            |
+            | `0x06`| SENSOR           | Live sensor view. No recording. No file access. |
 
     *   **`DS_Control_Point`**
         *   UUID: `00000007-8e22-4541-9d4c-21edae82ed19`
@@ -334,11 +354,26 @@ Provides information about the device's current operational state and allows for
             *   `0x02` (`DS_CMD_REBOOT_DEVICE`): Gracefully return to sleep, then reset. Payload: none.
             *   `0x03` (`DS_CMD_GET_DEVICE_ID`): Get device ID. Payload: none.
             *   `0x04` (`DS_CMD_INSTALL_UPLOADED_FIRMWARE`): Gracefully return to sleep, write `STANDALONE_LOADER_DWL_REQ` to the bootloader mailbox, then reset. Payload: none.
-            *   `0x10` (`DS_CMD_REQUEST_SLEEP`): Request sleep mode. Accepted from active, start, config, pairing, or sleep. Rejected from USB.
+            *   `0x10` (`DS_CMD_REQUEST_SLEEP`): Request sleep mode. Accepted from active, start, config, pairing, sensor, or sleep. Rejected from USB.
             *   `0x11` (`DS_CMD_REQUEST_ACTIVE`): Request active mode. Accepted only from sleep.
             *   `0x12` (`DS_CMD_REQUEST_START`): Request start mode. Accepted only from sleep.
             *   `0x13` (`DS_CMD_REQUEST_CONFIG`): Request config mode. Accepted only from sleep.
             *   `0x14` (`DS_CMD_REQUEST_PAIRING`): Request pairing mode. Accepted only from sleep.
+            *   `0x15` (`DS_CMD_REQUEST_SENSOR`): Request sensor mode. Accepted only from sleep. The FlySight goes back to sleep when the connection closes.
+            *   `0x16` (`DS_CMD_SET_ALT_ZERO`): Set the ground level (zero) for the altitude alarms, windows, and calls to the current position. Accepted only in active and sensor mode. The GNSS part is set if the last 10 GNSS measurements had a 3D fix and a vertical accuracy better than 10 m. The barometer part is set after 10 barometer averages. Payload: none. Response data: see below.
+            *   `0x17` (`DS_CMD_GET_ALT_ZERO`): Get the ground level. Accepted in all modes. Payload: none. Response data: see below.
+            *   Response data of `0x16` and `0x17` (12 bytes, little-endian):
+
+                | Offset | Type    | Value                                                                 |
+                |--------|---------|-----------------------------------------------------------------------|
+                | 0      | `uint8` | Parts that this command set: `0x01` GNSS, `0x02` barometer. Always 0 for `0x17`. |
+                | 1      | `uint8` | Zero flags: `0x01` GNSS zero is set, `0x02` barometer zero is set, `0x04` the last zero is automatic (`Alt_Zero: 1`). |
+                | 2      | `int32` | GNSS ground level (mm above sea level).                               |
+                | 6      | `int32` | Ground pressure (Pa × 100).                                           |
+                | 10     | `uint8` | `Alt_Source` of the last configuration that the firmware read.       |
+                | 11     | `uint8` | `Alt_Zero` of the last configuration that the firmware read.         |
+
+                RAM keeps the zero in sleep mode. A reset clears it. With a GNSS zero, the firmware ignores `DZ_Elev`. With `Alt_Source: 1` and a barometer zero, the height is the standard-atmosphere altitude difference between the current pressure and the ground pressure. With the barometer height, the alarms, the windows, the altitude calls, and the spoken altitude in the speech list work also without a GNSS fix. Then the barometer gives the vertical speed for `V_Thresh`, and `H_Thresh` is not used. The speech list speaks only its altitude items, and the tone is off. With `Alt_Zero: 1`, the firmware sets the zero again after 1 minute with no movement (ground speed below 0.5 m/s, vertical speed below 0.5 m/s) in active mode.
             *   USB mode is not requestable over BLE. USB entry/exit remains controlled by VBUS and the USB host.
         *   **Indication Responses (FlySight to Central, if indications enabled):**
             *   Format: `[0xF0 (CP_RESPONSE_ID)] [Request Opcode] [Status] [Optional Data]`
@@ -361,6 +396,7 @@ FlySight 2 also implements standard BLE services:
         *   **Permissions:** Encrypted Read.
         *   **Format:** `uint8` representing the battery level as a percentage (0-100%).
         *   **Usage:** Client applications can read this characteristic to get the current battery level of the FlySight 2. Notifications can be enabled on this characteristic to receive updates once per second.
+        *   **Modes:** In active mode with `Enable_Vbat` set, the firmware measures the battery each second and sends notifications. In all other modes, the firmware measures the battery when the central reads the characteristic or enables notifications. Periodic notifications are not sent in these modes, so read the characteristic again to get a new value.
 
 ## Implementation Notes & Best Practices
 
@@ -383,6 +419,7 @@ FlySight 2 also implements standard BLE services:
 | Sensor Data Service     |                           | `00000001-cc7a-482a-984a-7f2ed5b3e58f`       | Sensor_Data        |                        | N/A                |
 | GNSS Measurement        | `SD_GNSS_Measurement`     | `00000000-8e22-4541-9d4c-21edae82ed19`       | Sensor_Data        | Read, Notify           | 44 (Var)           |
 | Sensor Data Control     | `SD_Control_Point`        | `00000006-8e22-4541-9d4c-21edae82ed19`       | Sensor_Data        | Write, Indicate        | 20 (Var)           |
+| Sensor Measurement      | `SD_Sensor_Measurement`   | `00000008-8e22-4541-9d4c-21edae82ed19`       | Sensor_Data        | Notify                 | 47 (Var)           |
 | Starter Pistol Service  |                           | `00000002-cc7a-482a-984a-7f2ed5b3e58f`       | Starter_Pistol     |                        | N/A                |
 | Starter Pistol Control  | `SP_Control_Point`        | `00000003-8e22-4541-9d4c-21edae82ed19`       | Starter_Pistol     | Write, Indicate        | 20 (Var)           |
 | Starter Pistol Result   | `SP_Result`               | `00000004-8e22-4541-9d4c-21edae82ed19`       | Starter_Pistol     | Read, Indicate         | 9 (Const)          |
