@@ -45,7 +45,10 @@ bool ReplayParse_GNSS(const char *line, FS_GNSS_Data_t *data, int64_t *gps_ms);
 bool ReplayParse_Baro(const char *line, int64_t *time_us, int32_t *pressure);
 
 /* A $TIME line of sensor.csv. time_us is the sensor time (us) of the
-   time pulse. gps_ms is the GPS time of the pulse (ms since the GPS epoch). */
+   time pulse. gps_ms is the GPS time of the pulse (ms since the GPS epoch).
+   The FlySight aligns the time pulse to UTC (CFG-TP5 gridUtcGnss = 0), so
+   the tow in the line is UTC time of week. This function adds the leap
+   seconds, the same as ReplayParse_GNSS. */
 bool ReplayParse_Time(const char *line, int64_t *time_us, int64_t *gps_ms);
 
 #endif /* REPLAY_PARSE_H_ */

@@ -46,6 +46,10 @@
 #define END_MSEC     5000   /* Time for the last audio after the end of the track */
 #define ZERO_MSEC    60000  /* Look for the ground level only in the first minute */
 #define LINE_LEN     160
+#define TAIL_BYTES   32768  /* The landing search reads this much of the file end */
+#define LANDING_MSEC 5000   /* The landing is the average of this time at the end */
+#define MIN_RATE     40     /* Limits of Rate in config.txt (ms) */
+#define MAX_RATE     1000
 
 typedef struct
 {
@@ -86,10 +90,15 @@ static int64_t playBaseMs;
 static uint32_t endTick;
 static bool zeroDone;
 
+/* The audio expects one GNSS sample at each Rate interval. A track can have
+ * more samples (for example 20 Hz). */
+static uint16_t configRate;  /* Rate from the configuration (ms), or 0 */
+static int64_t audioMs;      /* Time of the last sample for the audio, or -1 */
+static int64_t lastMs;       /* Time of the last sample, or -1 */
+
 /* Barometer */
-static bool timeValid;
-static int64_t timeUs;
-static int64_t timeGps;
+#define TIME_LINES   32  /* $TIME lines for the time offset */
+static int64_t timeOffset;   /* GPS time (ms) - sensor time (ms) */
 static bool baroPending;
 static bool baroSeen;
 static int64_t baroGps;
@@ -162,11 +171,156 @@ static void readGNSS(void)
 	}
 }
 
+/* Go to a position in the file. After a position that is not 0, skip the
+   rest of the line. */
+static bool readerSeek(Reader_t *r, FSIZE_t pos)
+{
+	char line[LINE_LEN];
+
+	r->len = 0;
+	r->pos = 0;
+	r->eof = false;
+	if (!r->open || (f_lseek(&r->file, pos) != FR_OK)) return false;
+	if (pos > 0) readerLine(r, line, sizeof(line));
+	return true;
+}
+
+static FSIZE_t tailStart(Reader_t *r)
+{
+	const FSIZE_t size = f_size(&r->file);
+	return (size > TAIL_BYTES) ? size - TAIL_BYTES : 0;
+}
+
+/* Average GNSS altitude (mm) of the last LANDING_MSEC of the track, with a
+   3D fix. Two passes over the end of the file: find the last time, then
+   add the rows near it. */
+static bool landingHeight(int32_t *hmsl)
+{
+	char line[LINE_LEN];
+	FS_GNSS_Data_t data;
+	int64_t ms, last = INT64_MIN, sum = 0;
+	uint32_t count = 0;
+	const FSIZE_t start = tailStart(&track);
+	int pass;
+
+	for (pass = 0; pass < 2; ++pass)
+	{
+		if (!readerSeek(&track, start)) return false;
+		while (readerLine(&track, line, sizeof(line)))
+		{
+			if (!ReplayParse_GNSS(line, &data, &ms) || (data.gpsFix != 3)) continue;
+			if (pass == 0)
+			{
+				if (ms > last) last = ms;
+			}
+			else if (ms >= last - LANDING_MSEC)
+			{
+				sum += data.hMSL;
+				++count;
+			}
+		}
+		if (last == INT64_MIN) return false;
+	}
+
+	if (count == 0) return false;
+	*hmsl = (int32_t) (sum / count);
+	return true;
+}
+
+/* Average pressure (Pa * 100) of the last LANDING_MSEC of sensor.csv. The
+   sensor time is enough. A GPS time is not necessary. */
+static bool landingPressure(int32_t *pressure)
+{
+	char line[LINE_LEN];
+	int64_t t, last = INT64_MIN, sum = 0;
+	int32_t p;
+	uint32_t count = 0;
+	const FSIZE_t start = sensor.open ? tailStart(&sensor) : 0;
+	int pass;
+
+	if (!sensor.open) return false;
+
+	for (pass = 0; pass < 2; ++pass)
+	{
+		if (!readerSeek(&sensor, start)) return false;
+		while (readerLine(&sensor, line, sizeof(line)))
+		{
+			if (!ReplayParse_Baro(line, &t, &p)) continue;
+			if (pass == 0)
+			{
+				if (t > last) last = t;
+			}
+			else if (t >= last - (int64_t) LANDING_MSEC * 1000)
+			{
+				sum += p;
+				++count;
+			}
+		}
+		if (last == INT64_MIN) return false;
+	}
+
+	if (count == 0) return false;
+	*pressure = (int32_t) (sum / count);
+	return true;
+}
+
+/* Set the ground level from the end of the track (the landing). Then go
+   back to the start of the files. */
+static void setLandingZero(void)
+{
+	FS_AltRef_Zero_t landing = { 0, 0, 0 };
+
+	if (landingHeight(&landing.ground_hmsl)) landing.flags |= FS_ALT_REF_GNSS;
+	if (landingPressure(&landing.ground_pressure)) landing.flags |= FS_ALT_REF_BARO;
+	if (landing.flags != 0) FS_AltRef_RestoreZero(&landing);
+
+	readerSeek(&track, 0);
+	readerSeek(&sensor, 0);
+}
+
+/* Find the offset from the sensor time to the GPS time. Each $TIME line
+   gives an offset, but some lines are 1 s wrong (the time pulse and its
+   UBX-TIM-TP message do not always agree). Use the most frequent offset of
+   the first TIME_LINES lines. Then go back to the start of the file. */
+static bool findTimeOffset(int64_t *offset)
+{
+	char line[LINE_LEN];
+	int64_t offsets[TIME_LINES];
+	int64_t t, g;
+	uint32_t n = 0, i, j, best = 0, bestCount = 0;
+
+	if (!sensor.open || !readerSeek(&sensor, 0)) return false;
+
+	while ((n < TIME_LINES) && readerLine(&sensor, line, sizeof(line)))
+	{
+		if (ReplayParse_Time(line, &t, &g)) offsets[n++] = g - t / 1000;
+	}
+	readerSeek(&sensor, 0);
+	if (n == 0) return false;
+
+	for (i = 0; i < n; ++i)
+	{
+		uint32_t count = 0;
+		for (j = 0; j < n; ++j)
+		{
+			if (offsets[j] == offsets[i]) ++count;
+		}
+		if (count > bestCount)
+		{
+			best = i;
+			bestCount = count;
+		}
+	}
+
+	*offset = offsets[best];
+	return true;
+}
+
 /* Give the barometer measurements up to the GPS time until_ms to alt_ref.c */
 static void feedBaro(int64_t until_ms)
 {
 	char line[LINE_LEN];
-	int64_t t, g;
+	int64_t t;
 	int32_t p;
 
 	for (;;)
@@ -175,20 +329,11 @@ static void feedBaro(int64_t until_ms)
 		{
 			if (!readerLine(&sensor, line, sizeof(line))) return;
 
-			if (ReplayParse_Time(line, &t, &g))
-			{
-				timeValid = true;
-				timeUs = t;
-				timeGps = g;
-				continue;
-			}
-
-			/* A barometer measurement before the first time pulse has no GPS time */
-			if (!timeValid || !ReplayParse_Baro(line, &t, &p)) continue;
+			if (!ReplayParse_Baro(line, &t, &p)) continue;
 
 			baroUs = t;
 			baroPressure = p;
-			baroGps = timeGps + (t - timeUs) / 1000;
+			baroGps = t / 1000 + timeOffset;
 			baroPending = true;
 			baroSeen = true;
 		}
@@ -200,9 +345,36 @@ static void feedBaro(int64_t until_ms)
 	}
 }
 
+/* Give the current sample to the audio at the Rate interval of the
+ * configuration. Skip the samples between. The audio uses Rate as the time
+ * between two samples (speech interval, dive angle). Thus set Rate to the
+ * real time since the last sample for the audio. */
+static void feedAudio(int64_t sampleMs)
+{
+	/* The configuration is not constant memory (config.c). Replay changes
+	 * only Rate. The next mode reads the configuration again. */
+	FS_Config_Data_t *config = (FS_Config_Data_t *) FS_Config_Get();
+	const int64_t step = (lastMs >= 0) ? sampleMs - lastMs : configRate;
+	int64_t since = configRate;
+
+	if (audioMs >= 0)
+	{
+		since = sampleMs - audioMs;
+		if (since + step / 2 < configRate) return;
+	}
+
+	if (since < MIN_RATE) since = MIN_RATE;
+	if (since > MAX_RATE) since = MAX_RATE;
+	config->rate = (uint16_t) since;
+	audioMs = sampleMs;
+
+	FS_AudioControl_UpdateGNSS(&current);
+}
+
 static void stepSample(bool play)
 {
 	const FS_Config_Data_t *config = FS_Config_Get();
+	const int64_t sampleMs = nextMs;
 
 	current = next;
 
@@ -224,8 +396,9 @@ static void stepSample(bool play)
 
 	if (play && audio)
 	{
-		FS_AudioControl_UpdateGNSS(&current);
+		feedAudio(sampleMs);
 	}
+	lastMs = sampleMs;
 
 	readGNSS();
 }
@@ -351,7 +524,9 @@ void FS_ReplayMode_Init(void)
 	ticks = 0;
 	hasNext = false;
 	zeroDone = false;
-	timeValid = false;
+	configRate = 0;
+	audioMs = -1;
+	lastMs = -1;
 	baroPending = false;
 	baroSeen = false;
 	track.open = false;
@@ -383,6 +558,7 @@ void FS_ReplayMode_Init(void)
 		FS_Config_Read(FS_State_Get()->config_filename);
 	}
 	f_chdir("/");
+	configRate = FS_Config_Get()->rate;
 
 	if (folder[0] == '\0')
 	{
@@ -398,7 +574,16 @@ void FS_ReplayMode_Init(void)
 	}
 
 	snprintf(path, sizeof(path), "/%s/sensor.csv", folder);
-	readerOpen(&sensor, path);
+	/* Without a GPS time, the barometer data cannot be used */
+	if (readerOpen(&sensor, path) && !findTimeOffset(&timeOffset))
+	{
+		readerClose(&sensor);
+	}
+
+	if (flags & FS_REPLAY_FLAG_LANDING)
+	{
+		setLandingZero();
+	}
 
 	readGNSS();
 	if (!hasNext)
@@ -443,6 +628,11 @@ void FS_ReplayMode_DeInit(void)
 		FS_AudioControl_DeInit();
 		FS_Audio_DeInit();
 		audio = false;
+	}
+
+	if (configRate != 0)
+	{
+		((FS_Config_Data_t *) FS_Config_Get())->rate = configRate;
 	}
 
 	readerClose(&sensor);

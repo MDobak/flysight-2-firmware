@@ -60,7 +60,7 @@ static void test_sensor(void)
 
     CHECK(ReplayParse_Time("$TIME,120.000123,304514.200,2312\r\n", &t, &gps_ms));
     CHECK(t == 120000123);
-    CHECK(gps_ms == 2312LL * REPLAY_WEEK_MSEC + 304514200);
+    CHECK(gps_ms == 2312LL * REPLAY_WEEK_MSEC + 304514200 + REPLAY_LEAP_SECONDS * 1000);
 }
 
 int main(void)

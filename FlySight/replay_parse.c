@@ -270,6 +270,6 @@ bool ReplayParse_Time(const char *line, int64_t *time_us, int64_t *gps_ms)
 	}
 
 	*time_us = t;
-	*gps_ms = week * REPLAY_WEEK_MSEC + tow;
+	*gps_ms = week * REPLAY_WEEK_MSEC + tow + REPLAY_LEAP_SECONDS * 1000LL;
 	return true;
 }

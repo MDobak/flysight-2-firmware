@@ -35,6 +35,7 @@
 
 #define FS_REPLAY_FOLDER_LEN   17   /* For example "24-05-01/12-34-56" */
 #define FS_REPLAY_FLAG_ZERO    0x01 /* Set the ground level at the start of the track */
+#define FS_REPLAY_FLAG_LANDING 0x02 /* Set the ground level from the end of the track */
 
 typedef enum
 {
