@@ -148,6 +148,9 @@ static FS_CRS_State_t FS_CRS_State_Idle(void)
 				if (FS_ResourceManager_RequestResource(FS_RESOURCE_FATFS)
 						== FS_RESOURCE_MANAGER_SUCCESS)
 				{
+					// Terminate file name (fork: the old bytes of the buffer follow the name)
+					packet->data[packet->length] = 0;
+
 					// Create file
 					if (f_open(&file, (TCHAR *) &(packet->data[1]),
 							FA_WRITE|FA_CREATE_NEW) == FR_OK)
@@ -173,6 +176,9 @@ static FS_CRS_State_t FS_CRS_State_Idle(void)
 				if (FS_ResourceManager_RequestResource(FS_RESOURCE_FATFS)
 						== FS_RESOURCE_MANAGER_SUCCESS)
 				{
+					// Terminate file name (fork: the old bytes of the buffer follow the name)
+					packet->data[packet->length] = 0;
+
 					// Delete file
 					if (f_unlink((TCHAR *) &(packet->data[1])) == FR_OK)
 					{
@@ -281,6 +287,9 @@ static FS_CRS_State_t FS_CRS_State_Idle(void)
 				if (FS_ResourceManager_RequestResource(FS_RESOURCE_FATFS)
 						== FS_RESOURCE_MANAGER_SUCCESS)
 				{
+					// Terminate file name (fork: the old bytes of the buffer follow the name)
+					packet->data[packet->length] = 0;
+
 					// Create directory
 					if (f_mkdir((TCHAR *) &(packet->data[1])) == FR_OK)
 					{

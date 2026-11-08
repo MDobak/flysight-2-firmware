@@ -36,6 +36,7 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 | `FlySight/audio.c`, `audio.h` | The tone generator (see [Tone](#tone)): `FS_Audio_Voice_t`, the fade in `FS_Audio_LoadTone()`, `FS_Audio_Splice()`, and the splice in `FS_Audio_Beep()`. New functions: `FS_Audio_Tone()`, `FS_Audio_SetToneFrequency()`, `FS_Audio_EndTone()`, `FS_Audio_FadeOut()`, `FS_Audio_IsTone()`, and `FS_Audio_IsQuiet()`. |
 | `FlySight/audio_control.c` | Altitude from `alt_ref.c`, the spoken altitude format, and audio without a GNSS fix (barometer). The audio reads its GNSS data from `gnssSource`. The tone changes (see [Tone](#tone)): `updateToneOutput()`, `speechWaiting()`, `toneDue`, `toneFlat` in `setTone()`, and `FS_ToneExt_Change()` in `updateTones()`. `FS_Audio_FadeOut()` when the tone is suppressed. |
 | `FlySight/activelook_mode0.c` | `ALT_MIN_MM` is `INT32_MIN` (no minimum altitude). |
+| `FlySight/crs.c` | A zero byte after the path for `CREATE`, `DELETE` and `MK_DIR`. Upstream does not end these paths, so old bytes of the buffer follow the path. |
 | `FlySight/vbat.c`, `vbat.h` | `FS_VBAT_Measure()` at the end of the file. |
 | `STM32_WPAN/App/custom_app.c` | The `SD_Sensor_Measurement` cases, `Sensor_BLE_Init()`, `Sensor_BLE_OnDisconnect()`, and `Custom_VBAT_Refresh()`. All are in `USER CODE` sections. |
 | `STM32_WPAN/App/custom_stm.c`, `custom_stm.h` | Generated from the `.ioc` file. |

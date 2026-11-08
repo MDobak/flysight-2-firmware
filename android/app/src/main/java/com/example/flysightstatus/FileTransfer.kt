@@ -94,7 +94,10 @@ class FileTransfer(
     private fun send(packet: ByteArray) =
         connection.write(P.FILE_TRANSFER_SERVICE, P.FT_PACKET_IN, packet, withResponse = false)
 
-    private fun String.encodePath(): ByteArray = toByteArray(Charsets.ISO_8859_1)
+    // The FlySight firmware does not end the path of the create, delete and
+    // mkdir commands. Old bytes of its buffer then follow the path. Thus the
+    // app sends a zero byte after the path.
+    private fun String.encodePath(): ByteArray = toByteArray(Charsets.ISO_8859_1) + 0.toByte()
 
     // ---- Operations ----
 
