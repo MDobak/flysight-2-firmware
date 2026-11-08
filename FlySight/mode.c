@@ -71,6 +71,7 @@ static FS_Mode_StateFunc_t *const mode_state_table[FS_MODE_STATE_COUNT] =
 	FS_Mode_State_Pairing,
 	FS_Mode_State_Start,
 	FS_Mode_State_Ext, // Fork: FS_MODE_STATE_SENSOR
+	FS_Mode_State_Ext, // Fork: FS_MODE_STATE_REPLAY
 };
 
 static FS_Mode_State_t mode_state = FS_MODE_STATE_SLEEP;

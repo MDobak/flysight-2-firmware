@@ -28,7 +28,7 @@
 
 #include "mode.h"
 
-/* Fork modes (for example, sensor mode). mode.c has one handler for all
+/* Fork modes (sensor mode and replay mode). mode.c has one handler for all
    fork modes. These modes stop on a button press, on a request for sleep
    mode, on a terminal action, and on FS_MODE_EVENT_EXT_STOP. */
 

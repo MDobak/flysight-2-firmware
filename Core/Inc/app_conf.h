@@ -710,6 +710,7 @@ typedef enum
     CFG_TASK_FS_WATCHDOG_UPDATE_ID,
     CFG_TASK_FS_SENSOR_BLE_ID,
     CFG_TASK_FS_START_COUNT_ID,
+    CFG_TASK_FS_REPLAY_ID,
   /* USER CODE END CFG_Task_Id_With_NO_HCI_Cmd_t */
   CFG_LAST_TASK_ID_WITH_NO_HCICMD                                            /**< Shall be LAST in the list */
 } CFG_Task_Id_With_NO_HCI_Cmd_t;

@@ -29,6 +29,7 @@
 #include "control_point_protocol.h"
 #include "device_state_ext.h"
 #include "mode.h"
+#include "replay_mode.h"
 
 static void put_i32(uint8_t *buf, int32_t value)
 {
@@ -68,6 +69,25 @@ static uint8_t alt_zero_response(uint8_t set, uint8_t *buf)
     return 16;
 }
 
+/* Response data for DS_CMD_GET_REPLAY (11 bytes, little-endian):
+ *   [0]     State (FS_ReplayMode_State_t)
+ *   [1]     Error (FS_ReplayMode_Error_t)
+ *   [2..5]  Position: time of the last sample after the first sample (ms)
+ *   [6..9]  Height above the ground of the last sample (mm)
+ *   [10]    Source of the height (FS_ALT_REF_KIND_*)
+ */
+static uint8_t replay_response(uint8_t *buf)
+{
+    const FS_ReplayMode_Status_t *status = FS_ReplayMode_GetStatus();
+
+    buf[0] = status->state;
+    buf[1] = status->error;
+    put_i32(&buf[2], (int32_t)status->pos_ms);
+    put_i32(&buf[6], status->height);
+    buf[10] = status->kind;
+    return 11;
+}
+
 uint8_t DeviceStateExt_Handle(uint8_t opcode, const uint8_t *params, uint8_t params_len,
                               uint8_t *response, uint8_t *response_len)
 {
@@ -98,6 +118,29 @@ uint8_t DeviceStateExt_Handle(uint8_t opcode, const uint8_t *params, uint8_t par
                 return CP_STATUS_INVALID_PARAMETER;
             }
             *response_len = alt_zero_response(0, response);
+            return CP_STATUS_SUCCESS;
+
+        case DS_CMD_SET_REPLAY: {
+            if (params_len < 3) {
+                return CP_STATUS_INVALID_PARAMETER;
+            }
+            if (FS_Mode_State() == FS_MODE_STATE_REPLAY) {
+                return CP_STATUS_OPERATION_NOT_PERMITTED;
+            }
+            const uint16_t value = (uint16_t)(params[0] | (params[1] << 8));
+            const uint8_t flags = (value & 0x8000) ? FS_REPLAY_FLAG_ZERO : 0;
+            if (!FS_ReplayMode_Set((const char *)&params[2], params_len - 2,
+                                   value & 0x7FFF, flags)) {
+                return CP_STATUS_INVALID_PARAMETER;
+            }
+            return CP_STATUS_SUCCESS;
+        }
+
+        case DS_CMD_GET_REPLAY:
+            if (params_len != 0) {
+                return CP_STATUS_INVALID_PARAMETER;
+            }
+            *response_len = replay_response(response);
             return CP_STATUS_SUCCESS;
 
         default:

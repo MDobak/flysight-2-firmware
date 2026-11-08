@@ -39,6 +39,12 @@
                                     // Response Data: see alt_zero_response()
 #define DS_CMD_GET_ALT_ZERO    0x17 // Payload: (none)
                                     // Response Data: see alt_zero_response()
+#define DS_CMD_SET_REPLAY      0x18 // Payload: uint16 LE (bits 0-14: start offset in s,
+                                    // bit 15: set the ground level at the track start),
+                                    // then the log folder (1-17 characters, no NUL).
+                                    // Not permitted in replay mode.
+#define DS_CMD_GET_REPLAY      0x1A // Payload: (none)
+                                    // Response Data: see replay_response()
 
 /* Returns a CP_STATUS_* value. Puts the response data in response and
    its length in response_len. */

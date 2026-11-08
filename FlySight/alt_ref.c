@@ -318,6 +318,13 @@ const FS_AltRef_Zero_t *FS_AltRef_GetZero(void)
 	return &zero;
 }
 
+void FS_AltRef_RestoreZero(const FS_AltRef_Zero_t *saved)
+{
+	zero = *saved;
+	++epoch;
+	still = false;
+}
+
 bool FS_AltRef_UsesBaro(uint8_t source)
 {
 	return (source == 1) && (pressureAge <= MAX_BARO_AGE) && (zero.flags & FS_ALT_REF_BARO);
