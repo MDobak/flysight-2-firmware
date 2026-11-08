@@ -128,9 +128,10 @@ uint8_t DeviceStateExt_Handle(uint8_t opcode, const uint8_t *params, uint8_t par
                 return CP_STATUS_OPERATION_NOT_PERMITTED;
             }
             const uint16_t value = (uint16_t)(params[0] | (params[1] << 8));
-            const uint8_t flags = (value & 0x8000) ? FS_REPLAY_FLAG_ZERO : 0;
+            const uint8_t flags = ((value & 0x8000) ? FS_REPLAY_FLAG_ZERO : 0) |
+                                  ((value & 0x4000) ? FS_REPLAY_FLAG_LANDING : 0);
             if (!FS_ReplayMode_Set((const char *)&params[2], params_len - 2,
-                                   value & 0x7FFF, flags)) {
+                                   value & 0x3FFF, flags)) {
                 return CP_STATUS_INVALID_PARAMETER;
             }
             return CP_STATUS_SUCCESS;

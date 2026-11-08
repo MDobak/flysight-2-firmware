@@ -94,10 +94,11 @@ These extensions add to [ble.md](ble.md).
 
 - The LED pulses green. On an error, the LED is red and the FlySight goes back to Idle.
 - A central sets the track with `DS_CMD_SET_REPLAY` (`0x18`). Then it starts replay mode from Idle with `DS_CMD_REQUEST_REPLAY` (`0x19`).
-- The FlySight reads `config.txt` and the selected profile. Then it reads `track.csv` of the log folder at real-time speed. It reads the barometer data from `sensor.csv` if the file is there.
-- Each `$GNSS` row goes to the altitude reference and to the audio, as a GNSS measurement does in active mode. A row with `hAcc` above 1 km has no fix.
-- There is no GNSS, no log, and no ActiveLook. The speech timing follows the rows of the track, not `Rate`.
-- At the start, the ground level is clear. With bit 15 of the start offset, the FlySight sets the ground level from the first measurements of the track. At the end, the FlySight sets the ground level that it had before the replay.
+- The FlySight reads `config.txt` and the selected profile. Then it reads `track.csv` of the log folder at real-time speed. It reads the barometer data from `sensor.csv` if the file is there. The `$TIME` lines of `sensor.csv` give the time pulse in UTC time of week, so the FlySight adds the leap seconds (18 s). It uses the most frequent offset of the first 32 `$TIME` lines, because some lines are 1 s wrong. Without `$TIME` lines, the replay uses no barometer data.
+- Each `$GNSS` row goes to the altitude reference, as a GNSS measurement does in active mode. A row with `hAcc` above 1 km has no fix.
+- The audio gets one row at each `Rate` interval of the configuration, as in active mode. It does not get the rows between, for example in a 20 Hz track. If the track has fewer rows than `Rate`, the audio gets each row. During the replay, `Rate` in memory is the real time between two rows for the audio, so the speech interval is correct. At the end, the FlySight sets `Rate` back.
+- There is no GNSS, no log, and no ActiveLook.
+- At the start, the ground level is clear. With bit 15 of the start offset, the FlySight sets the ground level from the first measurements of the track. With bit 14, it sets the ground level from the landing before the replay starts: the average GNSS altitude (3D fix only) and the average pressure of the last 5 s of `track.csv` and `sensor.csv`. It reads only the last 32 KB of each file for this. If a file has no usable data, that part of the ground level stays clear. At the end, the FlySight sets the ground level that it had before the replay.
 - Before the start offset, the rows go only to the altitude reference, without audio.
 - The FlySight goes back to Idle 5 s after the end of the track, on `DS_CMD_REQUEST_SLEEP`, or on a button push. A BLE disconnect does not stop the replay.
 
@@ -131,7 +132,7 @@ A sensor that has no new value since the last packet is not in the packet. Keep 
   - Payload 9 bytes: set the parts to the values. Accepted in all modes. `uint8` parts to set (`0x01` GNSS, `0x02` barometer), `int32` GNSS ground level (mm above sea level), `int32` ground pressure (Pa × 100). The firmware ignores the value of a part that is not in the parts byte. A ground pressure of 0 or less is not set.
 - `0x17` (`DS_CMD_GET_ALT_ZERO`): Get the ground level. Accepted in all modes. Payload: none.
 - `0x18` (`DS_CMD_SET_REPLAY`): Set the track for replay mode. Not accepted in replay mode. Payload:
-  - Bytes 0-1: `uint16` (little-endian). Bits 0-14: start offset in seconds after the first row. Bit 15: set the ground level from the start of the track.
+  - Bytes 0-1: `uint16` (little-endian). Bits 0-13: start offset in seconds after the first row. Bit 14: set the ground level from the end of the track (the landing). Bit 15: set the ground level from the start of the track. Set only one of bits 14 and 15.
   - Bytes 2 and up: the log folder without the leading slash, 1 to 17 characters, no NUL. For example `24-05-01/12-34-56` or `temp/0001`.
 - `0x19` (`DS_CMD_REQUEST_REPLAY`): Request replay mode. Accepted only from sleep.
 - `0x1A` (`DS_CMD_GET_REPLAY`): Get the replay status. Accepted in all modes. Payload: none.
