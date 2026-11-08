@@ -34,6 +34,7 @@
 #include "alt_ref.h"
 #include "nav.h"
 #include "stm32_seq.h"
+#include "tone_ext.h"
 
 #define CONSUMER_TIMER_MSEC    10
 #define CONSUMER_TIMER_TICKS   (CONSUMER_TIMER_MSEC*1000/CFG_TS_TICK_VAL)
@@ -84,6 +85,8 @@ static volatile uint32_t tonePitch;
 static volatile int32_t  toneChirp;
 static volatile uint16_t toneRate;
 static volatile uint8_t  toneHold;
+static volatile uint8_t  toneDue;   // Fork: consumerTimer sets it, consumerTask plays the beep
+static bool              toneFlat;  // Fork: the flatline is on (two limits)
 
 static void setRate(uint16_t rate)
 {
@@ -115,7 +118,13 @@ static void setTone(
 	if (val_1 != INVALID_VALUE &&
 	    val_2 != INVALID_VALUE)
 	{
-		if (UNDER(val_2, min_2, max_2))
+		// Fork: with Flatline, two limits. The flatline stops only above
+		// Min_Val_2 plus 1/8 of the range. Thus noise does not switch it on
+		// and off.
+		const int32_t hyst = (config->flatline && toneFlat) ? (max_2 - min_2) / 8 : 0;
+		toneFlat = config->flatline && UNDER(val_2, min_2 + hyst, max_2);
+
+		if (UNDER(val_2, min_2 + hyst, max_2))
 		{
 			if (config->flatline)
 			{
@@ -188,6 +197,7 @@ static void setTone(
 	else
 	{
 		setRate(0);
+		toneFlat = false;
 	}
 
 	#undef OVER
@@ -733,7 +743,7 @@ static void updateAlarms(
 	{
 		*speech_ptr = '\0';
 		setRate(0);
-		FS_Audio_Stop();
+		FS_Audio_FadeOut();  // Fork: no click
 	}
 
 	g_suppress_tone = suppress_tone;
@@ -799,8 +809,6 @@ static void updateTones(
 {
 	const int32_t velD = current->velD / 10;
 
-	static int32_t x0 = INVALID_VALUE, x1, x2;
-
 	int32_t val_1 = INVALID_VALUE, min_1 = config->min, max_1 = config->max;
 	int32_t val_2 = INVALID_VALUE, min_2 = config->min_2, max_2 = config->max_2;
 
@@ -847,17 +855,16 @@ static void updateTones(
 	}
 	else if (config->mode_2 == FS_CONFIG_MODE_CHANGE_IN_VALUE_1)
 	{
-		x2 = x1;
-		x1 = x0;
-		x0 = val_1;
+		// Fork: the slope of value 1 in the last second (tone_ext.c). The
+		// upstream code used the difference of two samples, which has much
+		// noise.
+		const int32_t change = FS_ToneExt_Change(val_1, config->rate);
 
-		if (x0 != INVALID_VALUE &&
-			x1 != INVALID_VALUE &&
-			x2 != INVALID_VALUE &&
+		if (change != FS_TONE_EXT_INVALID &&
 			max_1 != min_1)
 		{
-			val_2 = (int32_t) 1000 * (x2 - x0) / (int32_t) (2 * config->rate);
-			val_2 = (int32_t) 10000 * ABS(val_2) / ABS(max_1 - min_1);
+			const int64_t v = (int64_t) 10000 * ABS((int64_t) change) / ABS(max_1 - min_1);
+			val_2 = (v < INT32_MAX) ? (int32_t) v : INT32_MAX - 1;
 		}
 	}
 	else
@@ -1043,11 +1050,12 @@ static void producerTask(void)
 static void consumerTimer(void)
 {
 	static uint16_t tone_timer = 0;
-	const FS_Config_Data_t *config = FS_Config_Get();
 
-	if (FS_Audio_IsIdle() && !toneHold && toneRate > 0 && 0x10000 - tone_timer <= toneRate)
+	// Fork: consumerTask plays the beep. It also controls the continuous
+	// tone, so all sounds start in one task.
+	if (toneRate > 0 && 0x10000 - tone_timer <= toneRate)
 	{
-		FS_Audio_Beep(tonePitch, tonePitch + toneChirp, 125, config->volume * 5);
+		toneDue = 1;
 	}
 
 	tone_timer += toneRate;
@@ -1056,9 +1064,63 @@ static void consumerTimer(void)
 	UTIL_SEQ_SetTask(1<<CFG_TASK_FS_AUDIO_CONTROL_CONSUMER_ID, CFG_SCH_PRIO_0);
 }
 
+// Fork: true if speech or a beep waits for the audio
+static bool speechWaiting(void)
+{
+	return (*speech_ptr != 0) ||
+			(flags & FLAG_FIRST_FIX) ||
+			((flags & FLAG_SAY_ALTITUDE) &&
+			 (flags & FLAG_HAS_ALT) &&
+			 (flags & FLAG_VERTICAL_ACC));
+}
+
+// Fork: the tone beeps, and the continuous tone for Flatline. Upstream used
+// a chain of 125 ms beeps for Flatline, with a click between two beeps.
+static void updateToneOutput(void)
+{
+	const FS_Config_Data_t *config = FS_Config_Get();
+	const bool due = toneDue;
+	const bool flat = (toneRate == FS_CONFIG_RATE_FLATLINE) && (toneChirp == 0);
+
+	toneDue = 0;
+
+	if (flat && !toneHold && !speechWaiting())
+	{
+		if (FS_Audio_IsTone())
+		{
+			FS_Audio_SetToneFrequency(tonePitch);
+		}
+		else if (FS_Audio_IsQuiet())
+		{
+			FS_Audio_Tone(tonePitch, config->volume * 5);
+		}
+		return;
+	}
+
+	// A due beep replaces the tone, else the tone fades out. When speech
+	// waits, the beep waits for idle audio, the same as upstream.
+	const bool free = speechWaiting() ? FS_Audio_IsIdle() :
+			(FS_Audio_IsQuiet() || FS_Audio_IsTone());
+
+	if (due && free && !toneHold && toneRate > 0)
+	{
+		FS_Audio_Beep(tonePitch, tonePitch + toneChirp, 125, config->volume * 5);
+	}
+	else if (FS_Audio_IsTone())
+	{
+		FS_Audio_EndTone();
+	}
+}
+
 static void consumerTask(void)
 {
 	const FS_Config_Data_t *config = FS_Config_Get();
+
+	// Fork: speech ends the continuous tone with a fade
+	if (FS_Audio_IsTone() && speechWaiting())
+	{
+		FS_Audio_EndTone();
+	}
 
 	if (*speech_ptr)
 	{
@@ -1246,6 +1308,9 @@ static void consumerTask(void)
 			speech_ptr = speech_buf;
 		}
 	}
+
+	// Fork: the beeps start here, not in consumerTimer
+	updateToneOutput();
 }
 
 void FS_AudioControl_Init(void)
@@ -1265,6 +1330,9 @@ void FS_AudioControl_Init(void)
 	toneChirp = 0;
 	toneRate = 0;
 	toneHold = 0;
+	toneDue = 0;
+	toneFlat = false;
+	FS_ToneExt_Reset();
 
 	// Initialize producer task
 	UTIL_SEQ_RegTask(1<<CFG_TASK_FS_AUDIO_CONTROL_PRODUCER_ID, UTIL_SEQ_RFU, producerTask);

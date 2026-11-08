@@ -20,6 +20,7 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 | `FlySight/mode_ext.c/h` | Fork modes (sensor mode). |
 | `FlySight/sensor_ble.c/h` | `SD_Sensor_Measurement` packets and the BLE task. |
 | `FlySight/sensor_mode.c/h` | Sensor mode. |
+| `FlySight/tone_ext.c/h` | The change of value 1 for `Mode_2: 9` (slope of the last second). No hardware. |
 | `Scripts/build.sh`, `Scripts/make_sfb.py` | Build without STM32CubeIDE, and make `APP.SFB`. |
 
 ## Hooks in upstream files
@@ -32,11 +33,22 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 | `FlySight/mode.c`, `mode.h` | `FS_MODE_STATE_SENSOR`, `FS_MODE_EVENT_EXT_STOP`, the `FS_Mode_State_Ext` handler, and `FS_ModeExt_Init()` in `FS_Mode_EnterRequestedState`. |
 | `FlySight/active_mode.c` | `FS_AltRef_Start()`, and the barometer is on for `Alt_Source: 1`. |
 | `FlySight/active_control.c` | `Sensor_BLE_DataReady()` in the sensor callbacks, `FS_AltRef_UpdateBaro()`, and `FS_AltRef_UpdateGNSS()`. |
-| `FlySight/audio_control.c` | Altitude from `alt_ref.c`, the spoken altitude format, and audio without a GNSS fix (barometer). The audio reads its GNSS data from `gnssSource`. |
+| `FlySight/audio.c`, `audio.h` | The tone generator (see [Tone](#tone)): `FS_Audio_Voice_t`, the fade in `FS_Audio_LoadTone()`, `FS_Audio_Splice()`, and the splice in `FS_Audio_Beep()`. New functions: `FS_Audio_Tone()`, `FS_Audio_SetToneFrequency()`, `FS_Audio_EndTone()`, `FS_Audio_FadeOut()`, `FS_Audio_IsTone()`, and `FS_Audio_IsQuiet()`. |
+| `FlySight/audio_control.c` | Altitude from `alt_ref.c`, the spoken altitude format, and audio without a GNSS fix (barometer). The audio reads its GNSS data from `gnssSource`. The tone changes (see [Tone](#tone)): `updateToneOutput()`, `speechWaiting()`, `toneDue`, `toneFlat` in `setTone()`, and `FS_ToneExt_Change()` in `updateTones()`. `FS_Audio_FadeOut()` when the tone is suppressed. |
 | `FlySight/activelook_mode0.c` | `ALT_MIN_MM` is `INT32_MIN` (no minimum altitude). |
 | `FlySight/vbat.c`, `vbat.h` | `FS_VBAT_Measure()` at the end of the file. |
 | `STM32_WPAN/App/custom_app.c` | The `SD_Sensor_Measurement` cases, `Sensor_BLE_Init()`, `Sensor_BLE_OnDisconnect()`, and `Custom_VBAT_Refresh()`. All are in `USER CODE` sections. |
 | `STM32_WPAN/App/custom_stm.c`, `custom_stm.h` | Generated from the `.ioc` file. |
+
+## Tone
+
+- With `Flatline: 1`, the constant tone is one continuous sound. Upstream played a chain of 125 ms beeps, with a click between two beeps. The pitch of the continuous tone moves smoothly to the new value (time constant 21 ms). Speech, alarms, and the altitude calls end the continuous tone.
+- Each tone starts and ends with a fade of 5 ms. Upstream started each beep at a random point of the sine wave and stopped it at full level, so the speaker clicked.
+- A beep during a tone, and the end of a tone, do not stop the DMA. `FS_Audio_Splice()` writes the new sound into the buffer 4 ms after the read position, with a fade between the two sounds. Upstream stopped the DMA and the SAI. This stopped the audio clock and gave a click. The splice goes back to the tone state that `FS_Audio_LoadTone()` keeps each 32 samples.
+- The tone generator uses about 2% of the CPU (64 MHz) while a tone plays. A splice writes the buffer again (up to 85 ms of audio, about 2 ms of CPU).
+- With `Flatline: 1`, the constant tone starts when value 2 goes below `Min_Val_2`. It stops only when value 2 goes above `Min_Val_2` plus 1/8 of the range (`Max_Val_2` − `Min_Val_2`). Thus small noise does not switch the constant tone on and off.
+- With `Mode_2: 9`, value 2 is the slope of value 1 in the last second (least squares). Upstream used the difference of two samples, 2 × `Rate` apart, which has much noise.
+- The beeps start in the consumer task, not in the timer interrupt. Thus all sounds start in one task.
 
 ## BLE extensions
 

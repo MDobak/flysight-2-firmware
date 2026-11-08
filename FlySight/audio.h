@@ -43,4 +43,14 @@ void FS_Audio_PlayList(const char *list, uint8_t volume);
 void FS_Audio_Stop(void);
 bool FS_Audio_IsIdle(void);
 
+// Fork: continuous tone (Flatline)
+void FS_Audio_Tone(uint32_t frequency, uint8_t volume);
+void FS_Audio_SetToneFrequency(uint32_t frequency);
+bool FS_Audio_IsTone(void);
+void FS_Audio_EndTone(void);
+void FS_Audio_FadeOut(void);
+
+// Fork: true if the audio is idle, or if only silence is left after a tone
+bool FS_Audio_IsQuiet(void);
+
 #endif /* AUDIO_H_ */
