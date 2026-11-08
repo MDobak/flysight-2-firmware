@@ -94,7 +94,6 @@ class MainActivity : Activity(), FlySightConnection.Listener {
     var currentTab = 0
         private set
     private val pushed = ArrayDeque<Screen>()
-    private var replay: ReplayDialog? = null
 
     val logLines = ArrayDeque<String>()
 
@@ -168,22 +167,23 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback)
 
         autoConnect()
-        handleReplayIntent(intent)
+        current = java.lang.ref.WeakReference(this)
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleReplayIntent(intent)
+    /** Gets the connection state and the values, for other activities. */
+    interface DeviceListener {
+        fun onStateChanged()
+        fun onValue(characteristic: UUID, value: ByteArray)
     }
 
-    /** The track viewer opens the replay dialog here, because this activity has the connection. */
-    private fun handleReplayIntent(intent: Intent?) {
-        val path = intent?.getStringExtra(EXTRA_REPLAY) ?: return
-        intent.removeExtra(EXTRA_REPLAY)
-        replay?.dismiss()
-        val dialog = ReplayDialog(this, java.io.File(path)) { replay = null }
-        replay = dialog
-        dialog.show()
+    private val listeners = mutableListOf<DeviceListener>()
+
+    fun addListener(listener: DeviceListener) {
+        if (listener !in listeners) listeners += listener
+    }
+
+    fun removeListener(listener: DeviceListener) {
+        listeners -= listener
     }
 
     /** The receive screen opens a tab ([EXTRA_TAB]) in the running app. */
@@ -208,6 +208,8 @@ class MainActivity : Activity(), FlySightConnection.Listener {
     }
 
     override fun onDestroy() {
+        if (current?.get() === this) current = null
+        listeners.clear()
         stopScan()
         sync.cancel()
         files?.reset()
@@ -288,7 +290,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         if (!::tabs.isInitialized) return
         tabs.forEach { it.onStateChanged() }
         pushed.forEach { it.onStateChanged() }
-        replay?.onStateChanged()
+        listeners.toList().forEach { it.onStateChanged() }
     }
 
     /** The file transfer if the app can use it now. Otherwise show why not and return null. */
@@ -784,6 +786,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         if (characteristic in STREAMS) {
             // Live data comes many times each second. It does not change the state.
             (tabs + pushed).forEach { it.onValue(characteristic, value) }
+        listeners.toList().forEach { it.onValue(characteristic, value) }
             return
         }
         when (characteristic) {
@@ -804,7 +807,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         }
         updated = LocalTime.now()
         (tabs + pushed).forEach { it.onValue(characteristic, value) }
-        replay?.onValue(characteristic, value)
+        listeners.toList().forEach { it.onValue(characteristic, value) }
         onStateChanged()
     }
 
@@ -817,7 +820,10 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         const val REQUEST_UPLOAD_FOLDER = 14
         const val REQUEST_IMPORT = 20
         const val REQUEST_TARGET = 30
-        const val EXTRA_REPLAY = "replay"
+        private var current: java.lang.ref.WeakReference<MainActivity>? = null
+
+        /** The activity that has the connection, or null. The track viewer uses it for the replay. */
+        val instance: MainActivity? get() = current?.get()?.takeUnless { it.isDestroyed }
 
         private const val SCAN_TIME_MS = 15_000L
         private const val KEEP_ALIVE_MS = 15_000L
