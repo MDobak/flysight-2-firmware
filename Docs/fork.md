@@ -22,6 +22,7 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 | `FlySight/sensor_ble.c/h` | `SD_Sensor_Measurement` packets and the BLE task. |
 | `FlySight/sensor_mode.c/h` | Sensor mode. |
 | `FlySight/tone_ext.c/h` | The change of value 1 for `Mode_2: 9` (slope of the last second). No hardware. |
+| `Audio/words.tsv` | The words of the new sound files. |
 | `Scripts/build.sh`, `Scripts/make_sfb.py` | Build without STM32CubeIDE, and make `APP.SFB`. |
 
 ## Hooks in upstream files
