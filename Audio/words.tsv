@@ -39,6 +39,7 @@ FEET	feet
 FLARE	flare
 GLIDE	glide
 HORZ	horizontal
+HSPEED	H speed
 IGLIDE	inverse glide
 KM	kilometers
 KNOTS	knots
@@ -53,5 +54,6 @@ RIGHT	right
 SPEED	speed
 TIME	time
 VERT	vertical
+VSPEED	V speed
 WOWSD	wows distance
 WOWSS	wows speed

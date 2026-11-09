@@ -241,12 +241,11 @@ object ConfigSchema {
         return out.joinToString(" ")
     }
 
-    /** A number as single digits, as the FlySight speaks speeds. */
+    /** A number as single digits, as the FlySight speaks values. The new firmware does not speak the decimal point. */
     private fun digits(v: Double, decimals: Int): String =
         // The FlySight cuts the extra decimal places. It does not round them.
-        java.math.BigDecimal(v).setScale(decimals, java.math.RoundingMode.DOWN).toPlainString().map { c ->
+        java.math.BigDecimal(v).setScale(decimals, java.math.RoundingMode.DOWN).toPlainString().filter { it != '.' }.map { c ->
             when (c) {
-                '.' -> "dot"
                 '-' -> "minus"
                 else -> ONES[c - '0']
             }
@@ -255,12 +254,16 @@ object ConfigSchema {
     private fun shortAltitude(file: ConfigFile) = (file.getInt("Alt_Format") ?: 0) == 1
 
     /**
-     * An altitude as the FlySight speaks it, as altitudeToSpeech in
-     * FlySight/audio_control.c builds it.
+     * An altitude as the FlySight speaks it, as speakAltitude in
+     * FlySight/audio_control.c builds it: "alti" and the value, with no unit.
      */
-    fun altitudeSpeech(value: Int, feet: Boolean, short: Boolean): String =
+    fun altitudeSpeech(value: Int, short: Boolean): String = "alti " +
         if (short && value >= 1000 && value % 100 == 0) (value / 100).toString().map { ONES[it - '0'] }.joinToString(" ")
-        else words(value) + if (feet) " feet" else " meters"
+        else words(value)
+
+    /** The name that the FlySight speaks before each spoken value. */
+    private val SPEECH_LABELS = mapOf(0 to "H speed", 1 to "V speed", 2 to "glide", 3 to "inverse glide", 4 to "speed",
+        5 to "direction", 6 to "distance", 7 to "bearing", 11 to "dive")
 
     /** An example of the speech for one spoken value. */
     private fun speechExample(mode: Int?, units: Int?, decimals: Int?, shortAltitude: Boolean): String {
@@ -281,10 +284,10 @@ object ConfigSchema {
                 val step = decimals ?: 1
                 if (step <= 0) return "Set a step of 1 or more."
                 val h = if (imperial) 4049.0 else 1234.0
-                altitudeSpeech((Math.round(h / step) * step).toInt(), imperial, shortAltitude)
+                altitudeSpeech((Math.round(h / step) * step).toInt(), shortAltitude)
             }
             else -> return ""
-        }
+        }.let { if (mode == 12) it else "${SPEECH_LABELS[mode]} $it" }
         return "For example: \"$text\""
     }
 
@@ -366,12 +369,13 @@ object ConfigSchema {
                 Choice("Sp_Mode", "Value", SPEECH_MODES, 2, "Tap the info button to read how the FlySight speaks each value.").more(SPOKEN_TIP),
                 Choice("Sp_Units", "Units", UNITS, 1, "km/h or mph for speeds. Meters or feet for altitude. Kilometers or miles for distance."),
                 Number("Sp_Dec", "Decimal places", 1, help = "For Altitude above ground, this is the step.").more(
-                    "For glide ratio, 1 decimal place is usually good, for example \"two dot five\". " +
-                        "For speeds, use 0 decimal places, for example \"two one zero\".\n\n" +
+                    "For glide ratio, 1 decimal place is usually good, for example \"glide two five\" for 2.5. " +
+                        "The FlySight does not speak the decimal point. " +
+                        "For speeds, use 0 decimal places, for example \"speed two one zero\".\n\n" +
                         "Direction to destination and Direction to bearing always have 0 decimal places. " +
                         "Distance to destination always has 1 decimal place.\n\n" +
                         "For Altitude above ground, this is a step, in meters or feet. The FlySight rounds the altitude to the step. " +
-                        "For example, with a step of 100 ft, the FlySight speaks 9 452 ft as \"nine thousand five hundred feet\". " +
+                        "For example, with a step of 100 ft, the FlySight speaks 9 452 ft as \"alti nine thousand five hundred\". " +
                         "Do not use 0 for the altitude."),
             ), 3, mapOf("Sp_Mode" to "2", "Sp_Units" to "0", "Sp_Dec" to "1"),
                 help = "The FlySight speaks these values in turn. Maximum 3.",
@@ -409,8 +413,8 @@ object ConfigSchema {
             },
             Number("Alt_Step", "Altitude calls", 0, 0..Int.MAX_VALUE, "Speak the height above the ground level at each step. 0 = off.",
                 display = { Display(altitudeUnit(it)) }).more(
-                "For example, with a step of 1 000 ft, the FlySight speaks \"twelve thousand feet\", \"eleven thousand feet\", and so on. " +
-                    "With the short format, it speaks \"one two zero\", \"one one zero\", and so on. " +
+                "For example, with a step of 1 000 ft, the FlySight speaks \"alti twelve thousand\", \"alti eleven thousand\", and so on, with no unit. " +
+                    "With the short format, it speaks \"alti one two zero\", \"alti one one zero\", and so on. " +
                     "It does not speak 0 at the ground.\n\n" +
                     "The FlySight speaks a call only above the speed thresholds, and not in a silence window. " +
                     "There is a quiet zone around each call (see Quiet zones).\n\n" +
@@ -418,10 +422,11 @@ object ConfigSchema {
             Choice("Alt_Units", "Altitude call units", listOf(0 to "m", 1 to "ft"), 1, "For the altitude calls and the step."),
             Choice("Alt_Format", "Altitude call format", listOf(0 to "Full", 1 to "Short"), 0,
                 "How the FlySight speaks the altitude.").more(
-                "Full: the number in words, with the unit. For example, 2 500 is \"two thousand five hundred meters\".\n\n" +
-                    "Short: from 1 000, only the digits of the hundreds, with no unit. " +
-                    "For example, 2 000 is \"two zero\", 2 500 is \"two five\", and 12 500 is \"one two five\". " +
-                    "Below 1 000, the FlySight uses the full format, for example \"nine hundred meters\". " +
+                "The FlySight speaks \"alti\" and the altitude, with no unit.\n\n" +
+                    "Full: the number in words. For example, 2 500 is \"alti two thousand five hundred\".\n\n" +
+                    "Short: from 1 000, only the digits of the hundreds. " +
+                    "For example, 2 000 is \"alti two zero\", 2 500 is \"alti two five\", and 12 500 is \"alti one two five\". " +
+                    "Below 1 000, the FlySight uses the full format, for example \"alti nine hundred\". " +
                     "An altitude that is not a full hundred (for example 2 550 with a step of 50) also uses the full format.\n\n" +
                     "This setting applies to the altitude calls, to the altitude in the spoken values, " +
                     "and to the altitude that the FlySight speaks after power on. " +
@@ -604,18 +609,21 @@ object ConfigSchema {
 
     private const val SPOKEN_TIP =
         "How the FlySight speaks each value:\n\n" +
-            "Horizontal, vertical, and total speed: the digits one by one, with no unit. " +
-            "For example, 185 km/h is \"one eight five\". A climb starts with \"minus\".\n\n" +
-            "Glide ratio and inverse glide ratio: the digits, for example \"two dot five\".\n\n" +
-            "Dive angle: the degrees as digits, for example \"three five\".\n\n" +
-            "Direction to destination and Direction to bearing: the degrees as digits, then \"left\" or \"right\", " +
-            "for example \"four five left\".\n\n" +
-            "Distance to destination: kilometers or miles with 1 decimal place, for example \"one dot two kilometers\".\n\n" +
-            "Altitude above ground: the number in words with the unit, rounded to the step. " +
-            "For example, \"one thousand two hundred meters\". With the short altitude call format, \"one two\". " +
+            "The FlySight speaks the name of the value, then the value. The digits come one by one, " +
+            "with no decimal point and no unit.\n\n" +
+            "Horizontal speed, vertical speed, and total speed: \"H speed\", \"V speed\", and \"speed\". " +
+            "For example, 185 km/h is \"V speed one eight five\". A climb starts with \"minus\".\n\n" +
+            "Glide ratio and inverse glide ratio: \"glide\" and \"inverse glide\". For example, 2.5 is \"glide two five\".\n\n" +
+            "Dive angle: \"dive\" and the degrees, for example \"dive three five\".\n\n" +
+            "Direction to destination and Direction to bearing: \"direction\" or \"bearing\", the degrees, then \"left\" or \"right\". " +
+            "For example, \"direction four five left\".\n\n" +
+            "Distance to destination: \"distance\", kilometers or miles with 1 decimal place, and the unit. " +
+            "For example, 1.2 km is \"distance one two kilometers\".\n\n" +
+            "Altitude above ground: \"alti\" and the number in words, rounded to the step, with no unit. " +
+            "For example, \"alti one thousand two hundred\". With the short altitude call format, \"alti one two\". " +
             "It uses the Altitude source setting, " +
             "so with the barometer it works also without a GPS fix.\n\n" +
-            "With more than one value, the FlySight first speaks the name of the value, for example \"vertical one eight five\".\n\n" +
+            "The new firmware needs the sound files HSPEED.WAV and VSPEED.WAV in /audio. ALT.WAV must say \"alti\".\n\n" +
             "All values except the altitude come from the GPS."
 
     /** The sections in groups of related sections, in the order of the form. */

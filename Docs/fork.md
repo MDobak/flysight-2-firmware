@@ -56,6 +56,14 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 - With `Mode_2: 9`, value 2 is the slope of value 1 in the last second (least squares). Upstream used the difference of two samples, 2 × `Rate` apart, which has much noise.
 - The beeps start in the consumer task, not in the timer interrupt. Thus all sounds start in one task.
 
+## Speech
+
+- Each spoken value starts with its name, also with only one value in the speech list. For example, "glide 1 2" or "V speed 1 8 5". Upstream spoke the name only with two or more values.
+- The names are short: "H speed" (`hspeed.wav`), "V speed" (`vspeed.wav`), "speed", "glide", "inverse glide", "dive", "direction", "distance", "bearing", and "alti" (`alt.wav`).
+- The FlySight does not speak the decimal point. 1.2 is "1 2".
+- The altitude calls, the altitude in the speech list, and the altitude after power on are "alti" and the altitude, with no unit. The short format (`Alt_Format: 1`) has no decimal point.
+- All folders in `Audio/`, but not `Audio/original/`, have the sound files for this format. The upstream sound files do not have `hspeed.wav` and `vspeed.wav`, and their `alt.wav` says "altitude".
+
 ## BLE extensions
 
 These extensions add to [ble.md](ble.md).

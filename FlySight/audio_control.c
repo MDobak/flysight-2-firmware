@@ -436,13 +436,12 @@ static char *numberToSpeech(
     return ptr;
 }
 
-// Fork: speak an altitude in meters or feet. Full format: the number in
-// words and the unit. Short format (Alt_Format): from 1000, the digits of
-// the hundreds with no unit ("2 5" is 2500). Below 1000, or not at a full
-// hundred, the full format.
+// Fork: speak an altitude in meters or feet, with no unit. Full format:
+// the number in words. Short format (Alt_Format): from 1000, the digits of
+// the hundreds ("2 5" is 2500). Below 1000, or not at a full hundred, the
+// full format.
 static char *altitudeToSpeech(
 	int32_t value,
-	uint8_t units,
 	char *ptr)
 {
 	if ((FS_ConfigExt_Get()->alt_format == FS_CONFIG_ALT_FORMAT_SHORT) &&
@@ -464,9 +463,19 @@ static char *altitudeToSpeech(
 		return ptr;
 	}
 
-	ptr = numberToSpeech(value, ptr);
-	*(ptr++) = (units == FS_CONFIG_UNITS_METERS) ? 'm' : 'f';
-	return ptr;
+	return numberToSpeech(value, ptr);
+}
+
+// Fork: an altitude call, "alti" and the altitude
+static void speakAltitude(
+	int32_t value)
+{
+	speech_ptr = speech_buf;
+	*(speech_ptr++) = '>';
+	*(speech_ptr++) = FS_CONFIG_MODE_ALTITUDE + 1;
+	speech_ptr = altitudeToSpeech(value, speech_ptr);
+	*(speech_ptr++) = '\0';
+	speech_ptr = speech_buf;
 }
 
 static void speakValue(
@@ -619,18 +628,23 @@ static void speakValue(
 		}
 		step = ((altHMSL - config->dz_elev) * 10 + step_size / 2) / step_size;
 		speech_ptr = speech_buf + 2;
-		speech_ptr = altitudeToSpeech(step * config->speech[cur_speech].decimals, config->speech[cur_speech].units, speech_ptr);
+		speech_ptr = altitudeToSpeech(step * config->speech[cur_speech].decimals, speech_ptr);
 		end_ptr = speech_ptr;
 		speech_ptr = speech_buf + 2;
 		break;
 	}
 
-	// Step 1.5: Include label
-	if (config->num_speech > 1)
+	// Fork: no value (for example glide ratio with no vertical speed)
+	if ((speech_ptr >= end_ptr) || (*speech_ptr == '\0'))
 	{
-		*(--speech_ptr) = config->speech[cur_speech].mode + 1;
-		*(--speech_ptr) = '>';
+		speech_buf[0] = '\0';
+		speech_ptr = speech_buf;
+		return;
 	}
+
+	// Step 1.5: Include label (fork: always, "glide 1 2")
+	*(--speech_ptr) = config->speech[cur_speech].mode + 1;
+	*(--speech_ptr) = '>';
 
 	// Step 2: Truncate to the desired number of decimal places
 
@@ -638,6 +652,14 @@ static void speakValue(
 	{
 		if (config->speech[cur_speech].decimals == 0) end_ptr -= 4;
 		else end_ptr -= 3 - config->speech[cur_speech].decimals;
+
+		// Fork: no "dot", only the digits ("1 2" is 1.2)
+		char *src, *dst;
+		for (src = dst = speech_ptr; src < end_ptr; ++src)
+		{
+			if (*src != '.') *(dst++) = *src;
+		}
+		end_ptr = dst;
 	}
 
 	// Step 3: Add units if needed, e.g., *(end_ptr++) = 'k';
@@ -671,7 +693,7 @@ static void speakValue(
 		}
 		break;
 	case FS_CONFIG_MODE_ALTITUDE:
-		// Fork: altitudeToSpeech adds the unit
+		// Fork: no unit
 		break;
 	}
 
@@ -794,10 +816,7 @@ static void updateAlarms(
 			    ABS(velD) >= config->threshold &&
 			    current->gSpeed >= config->hThreshold)
 			{
-				speech_ptr = speech_buf;
-				speech_ptr = altitudeToSpeech(step * config->alt_step, config->alt_units, speech_ptr);
-				*(speech_ptr++) = '\0';
-				speech_ptr = speech_buf;
+				speakAltitude(step * config->alt_step);
 			}
 		}
 	}
@@ -1186,10 +1205,10 @@ static void consumerTask(void)
 				switch ((*speech_ptr) - 1)
 				{
 					case 0:
-						FS_Audio_Play("horz.wav", config->sp_volume * 5);
+						FS_Audio_Play("hspeed.wav", config->sp_volume * 5);  // Fork: "H speed"
 						break;
 					case 1:
-						FS_Audio_Play("vert.wav", config->sp_volume * 5);
+						FS_Audio_Play("vspeed.wav", config->sp_volume * 5);  // Fork: "V speed"
 						break;
 					case 2:
 						FS_Audio_Play("glide.wav", config->sp_volume * 5);
@@ -1293,19 +1312,15 @@ static void consumerTask(void)
 			FS_Audio_IsIdle())
 		{
 			flags &= ~FLAG_SAY_ALTITUDE;
-			speech_ptr = speech_buf;
 
 			if (config->alt_units == FS_CONFIG_UNITS_METERS)
 			{
-				speech_ptr = altitudeToSpeech((prevHMSL - config->dz_elev) / 1000, config->alt_units, speech_ptr);
+				speakAltitude((prevHMSL - config->dz_elev) / 1000);
 			}
 			else
 			{
-				speech_ptr = altitudeToSpeech((prevHMSL - config->dz_elev) * 10 / 3048, config->alt_units, speech_ptr);
+				speakAltitude((prevHMSL - config->dz_elev) * 10 / 3048);
 			}
-
-			*(speech_ptr++) = '\0';
-			speech_ptr = speech_buf;
 		}
 	}
 
