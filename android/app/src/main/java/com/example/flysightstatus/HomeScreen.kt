@@ -262,10 +262,12 @@ class HomeScreen(main: MainActivity) : Screen(main) {
                 "connecting" -> addButton(Ui.ButtonStyle.OUTLINED, "Cancel") { main.disconnect() }
                 "busy" -> {
                     addButton(Ui.ButtonStyle.OUTLINED, "Config") { main.selectTab(MainActivity.TAB_CONFIG) }
+                    addDisconnect()
                 }
                 "ready" -> {
                     addButton(Ui.ButtonStyle.FILLED, "Get new jumps", R.drawable.ic_download) { getNewJumps() }
                     addButton(Ui.ButtonStyle.OUTLINED, "Config") { main.selectTab(MainActivity.TAB_CONFIG) }
+                    addDisconnect()
                 }
                 "remembered" -> {
                     addButton(Ui.ButtonStyle.FILLED, "Connect", R.drawable.ic_bluetooth) { main.connectOrScan() }
@@ -274,6 +276,23 @@ class HomeScreen(main: MainActivity) : Screen(main) {
                 else -> addButton(Ui.ButtonStyle.FILLED, "Connect", R.drawable.ic_bluetooth) { main.connectOrScan() }
             }
         }
+    }
+
+    /** A round outlined icon button at the end of the row, the same height as the other buttons. */
+    private fun addDisconnect() {
+        buttons.addView(View(main), LinearLayout.LayoutParams(0, 0, 1f))
+        val fg = ui.onPrimaryContainer
+        val b = android.widget.ImageView(main).apply {
+            setImageResource(R.drawable.ic_bluetooth_disabled)
+            imageTintList = android.content.res.ColorStateList.valueOf(fg)
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            val ring = ui.shape(android.graphics.Color.TRANSPARENT, 20f, ui.outline)
+            background = android.graphics.drawable.InsetDrawable(ui.ripple(fg, ring, 20f), ui.dp(4))
+            contentDescription = "Disconnect"
+            tooltipText = "Disconnect"
+            setOnClickListener { main.disconnect() }
+        }
+        buttons.addView(b, LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)))
     }
 
     private fun addButton(style: Ui.ButtonStyle, label: String, icon: Int? = null, onClick: () -> Unit) {
