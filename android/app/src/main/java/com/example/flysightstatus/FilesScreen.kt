@@ -669,22 +669,6 @@ class FilesScreen(main: MainActivity) : Screen(main) {
     }
 
     /** Write an APP.SFB file to /FW and offer to install it. */
-    fun uploadFirmware(data: ByteArray) {
-        if (data.size < 512 || data.copyOfRange(0, 4).toString(Charsets.ISO_8859_1) != "SFU1") {
-            ui.dialog("This is not an APP.SFB file", "An update file starts with \"SFU1\". Make it with Scripts/build.sh --batch.",
-                positive = Ui.DialogButton("OK"), negative = null).show()
-            return
-        }
-        val f = main.idleFiles() ?: return
-        // The folder is usually there. A NAK only means that it exists.
-        f.mkdir("/FW") { _ ->
-            writeFile("/FW/APP.SFB", data) {
-                listDir("/FW")
-                main.confirm("Upload complete", "Install /FW/APP.SFB now?", "Install") { main.sendDs(P.DS_CMD_INSTALL_FIRMWARE) }
-            }
-        }
-    }
-
     private companion object {
         const val MAX_EDIT_SIZE = 64 * 1024L
         const val PHONE_ROOT = "Download/FlySight"
