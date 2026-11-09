@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.mdobak.flysightstatus.Ui.Companion.MATCH
 import com.mdobak.flysightstatus.Ui.Companion.WRAP
@@ -41,7 +42,7 @@ class ReplayPanel(
 
     private var start = START_TRACK
     private val prefs = main.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
-    private var ground = prefs.getInt(PREF_GROUND, GROUND_LANDING).coerceIn(GROUND_LANDING, GROUND_CONFIG)
+    private var ground = prefs.getInt(PREF_GROUND, GROUND_LANDING).coerceIn(GROUND_LANDING, GROUND_DEVICE)
     private var status: ReplayStatus? = null
     /** [SystemClock.uptimeMillis] when [status] came. */
     private var statusAt = 0L
@@ -54,18 +55,20 @@ class ReplayPanel(
     private var listening = false
     private var polling = false
 
-    private val startChoice = ui.Segmented(listOf("From the start", "1 min before exit"), START_TRACK) { start = it; update() }
-    private val startLabel = ui.text(Ui.Type.LABEL_LARGE, "Start point", ui.onSurfaceVariant)
-    private val groundHelp = ui.text(Ui.Type.BODY_SMALL, "", ui.onSurfaceVariant)
-    private val groundChoice = ui.Segmented(listOf("Landing", "Track start", "DZ_Elev"), ground) {
+    private val startChoice = ui.Segmented(listOf("Track start", "1 min before exit"), START_TRACK, compact = true) {
+        start = it
+        update()
+    }
+    private val startRow = settingRow("Play from", startChoice)
+    private val groundChoice = ui.Segmented(listOf("Landing", "Track start", "Device"), ground, compact = true) {
         ground = it
         prefs.edit().putInt(PREF_GROUND, it).apply()
         update()
     }
     private val setup = ui.column()
-    private val stateText = ui.text(Ui.Type.TITLE_MEDIUM, "")
-    private val detailText = ui.text(Ui.Type.BODY_MEDIUM, "", ui.onSurfaceVariant).apply { fontFeatureSettings = "tnum" }
-    private val messageText = ui.text(Ui.Type.BODY_MEDIUM, "", ui.error)
+    private val stateText = ui.text(Ui.Type.TITLE_SMALL, "")
+    private val detailText = ui.text(Ui.Type.BODY_SMALL, "", ui.onSurfaceVariant).apply { fontFeatureSettings = "tnum" }
+    private val messageText = ui.text(Ui.Type.BODY_SMALL, "", ui.error)
     private val progress = ui.linearProgress()
     private val button = ui.button(Ui.ButtonStyle.FILLED, "Start", R.drawable.ic_play) { onButton() }
 
@@ -93,31 +96,29 @@ class ReplayPanel(
 
     init {
         setup.apply {
-            addView(startLabel, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = ui.dp(4) })
-            addView(startChoice, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = ui.dp(12) })
-            addView(ui.text(Ui.Type.LABEL_LARGE, "Ground level", ui.onSurfaceVariant), LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = ui.dp(4) })
-            addView(groundChoice, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(groundHelp, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = ui.dp(4) })
+            addView(startRow, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = ui.dp(8) })
+            addView(settingRow("Ground", groundChoice), LinearLayout.LayoutParams(MATCH, WRAP))
         }
         val texts = ui.column().apply {
             addView(stateText)
             addView(detailText)
         }
-        val statusRow = LinearLayout(ui.context).apply {
+        val header = LinearLayout(ui.context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(texts, LinearLayout.LayoutParams(0, WRAP, 1f))
             addView(button, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginStart = ui.dp(12) })
         }
-        view = ui.column().apply {
-            setPadding(0, ui.dp(4), 0, ui.dp(8))
-            addView(ui.column().apply {
-                setPadding(ui.dp(16), 0, ui.dp(16), 0)
-                addView(setup, LinearLayout.LayoutParams(MATCH, WRAP).apply { bottomMargin = ui.dp(12) })
-                addView(statusRow, LinearLayout.LayoutParams(MATCH, WRAP))
-                addView(messageText, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = ui.dp(4) })
-            }, LinearLayout.LayoutParams(MATCH, WRAP))
-            addView(progress, LinearLayout.LayoutParams(MATCH, ui.dp(4)).apply { topMargin = ui.dp(8) })
+        val card = ui.card(ui.surfaceContainerHigh, 16f, 0).apply {
+            setPadding(ui.dp(16), ui.dp(8), ui.dp(12), ui.dp(12))
+            addView(header, LinearLayout.LayoutParams(MATCH, WRAP))
+            addView(messageText, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = ui.dp(4) })
+            addView(setup, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = ui.dp(8); marginEnd = ui.dp(4) })
+            addView(progress, LinearLayout.LayoutParams(MATCH, ui.dp(4)).apply { topMargin = ui.dp(12); marginEnd = ui.dp(4) })
+        }
+        view = FrameLayout(ui.context).apply {
+            setPadding(ui.dp(12), ui.dp(4), ui.dp(12), ui.dp(8))
+            addView(card, FrameLayout.LayoutParams(MATCH, WRAP))
         }
         Thread {
             val first = runCatching { firstRow(file) }.getOrNull()
@@ -127,6 +128,14 @@ class ReplayPanel(
             }
         }.start()
         update()
+    }
+
+    /** A label and a choice in one row. */
+    private fun settingRow(label: String, choice: View) = LinearLayout(ui.context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(ui.text(Ui.Type.LABEL_MEDIUM, label, ui.onSurfaceVariant), LinearLayout.LayoutParams(ui.dp(64), WRAP))
+        addView(choice, LinearLayout.LayoutParams(0, WRAP, 1f))
     }
 
     /** The track viewer read the track. */
@@ -268,19 +277,12 @@ class ReplayPanel(
         val t = track
         val s = status
         val active = active
-        startChoice.visibility = if (t == null || t.hasExit) View.VISIBLE else View.GONE
-        startLabel.visibility = startChoice.visibility
+        startRow.visibility = if (t == null || t.hasExit) View.VISIBLE else View.GONE
         setup.visibility = if (active || starting) View.GONE else View.VISIBLE
-        groundHelp.text = when (ground) {
-            GROUND_LANDING -> "The FlySight uses the GPS altitude and the pressure at the end of the track. " +
-                "Use this if the track ends on the ground."
-            GROUND_START -> "The FlySight uses the first measurements of the track, as if you set the ground level before the jump."
-            else -> "The FlySight uses Ground elevation (DZ_Elev) or the automatic ground level. The barometer is not used."
-        }
 
         stateText.text = when {
             starting -> "Starting…"
-            s == null || s.state == ReplayStatus.IDLE -> if (active) "Replay mode" else "Ready"
+            s == null || s.state == ReplayStatus.IDLE -> if (active) "Replay mode" else "Replay on the FlySight"
             s.state == ReplayStatus.SEEKING -> "Going to the start position…"
             s.state == ReplayStatus.PLAYING -> "Playing"
             s.state == ReplayStatus.DONE -> if (active) "End of the track" else "Done"
@@ -292,12 +294,14 @@ class ReplayPanel(
             s != null && s.state == ReplayStatus.ERROR && !starting -> errorText(s.error)
             showsPosition && s != null -> "${position(positionMs(s))} · ${heightText(s)}"
             !main.connected -> "Connect to the FlySight to start."
-            else -> "The FlySight plays the jump through its audio, with its current configuration."
+            ground == GROUND_LANDING -> "Ground level from the end of the track"
+            ground == GROUND_START -> "Ground level from the start of the track"
+            else -> "Ground level that is set on the FlySight"
         }
 
         val first = firstRowMs ?: t?.epochMs?.first()
         val duration = if (t != null && first != null) (t.epochMs.last() - first).coerceAtLeast(1) else null
-        progress.visibility = if (starting || s?.running == true) View.VISIBLE else View.INVISIBLE
+        progress.visibility = if (starting || s?.running == true) View.VISIBLE else View.GONE
         progress.isIndeterminate = starting || s?.state == ReplayStatus.SEEKING || duration == null
         if (s != null && duration != null) progress.progress = (positionMs(s) * 1000 / duration).toInt().coerceIn(0, 1000)
 
@@ -350,7 +354,7 @@ class ReplayPanel(
         const val LANDING_FLAG = 0x4000
         const val GROUND_LANDING = 0
         const val GROUND_START = 1
-        const val GROUND_CONFIG = 2
+        const val GROUND_DEVICE = 2
         const val PREFS = "replay"
         const val PREF_GROUND = "ground"
         const val POLL_MS = 1000L
