@@ -68,14 +68,7 @@ class TrackChartView(context: Context, private val ui: Ui) : View(context) {
     private val density = resources.displayMetrics.density
     private val padLeft = 44 * density
     private val padRight = 44 * density
-    /** More space above the plot, in pixels, for a floating button. */
-    var extraTop = 0f
-        set(value) {
-            if (field == value) return
-            field = value
-            invalidate()
-        }
-    private val padTop get() = 8 * density + extraTop
+    private val padTop = 8 * density
     private val padBottom = 22 * density
 
     private val textColor = ui.onSurfaceVariant

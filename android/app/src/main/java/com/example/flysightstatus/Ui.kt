@@ -263,8 +263,8 @@ class Ui(val context: Context) {
     }
 
     /**
-     * M3 connected button group with icon toggles. Exactly one button is selected.
-     * The selected button is fully round. The other buttons have small inner corners.
+     * Segmented control with icons. Exactly one segment is selected. One rounded
+     * outline goes around the segments, with thin lines between them.
      */
     inner class IconToggleGroup(items: List<Pair<Int, String>>, selected: Int, private val onSelect: (Int) -> Unit) :
         LinearLayout(context) {
@@ -285,8 +285,16 @@ class Ui(val context: Context) {
         init {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            // One outline around the group. The fills of the segments are clipped to it.
+            foreground = shape(Color.TRANSPARENT, 18f, outline)
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, o: android.graphics.Outline) =
+                    o.setRoundRect(0, 0, view.width, view.height, dpf(18f))
+            }
+            clipToOutline = true
             for ((i, b) in buttons.withIndex()) {
-                addView(b, LayoutParams(dp(48), dp(48)).apply { if (i > 0) marginStart = dp(2) })
+                if (i > 0) addView(View(context).apply { setBackgroundColor(outline) }, LayoutParams(dp(1), MATCH))
+                addView(b, LayoutParams(dp(44), dp(36)))
             }
             select(selected, notify = false)
         }
@@ -295,15 +303,10 @@ class Ui(val context: Context) {
             selected = index
             for ((i, b) in buttons.withIndex()) {
                 val on = i == index
-                val start = dpf(if (on || i == 0) 20f else 6f)
-                val end = dpf(if (on || i == buttons.lastIndex) 20f else 6f)
-                val shape = GradientDrawable().apply {
-                    setColor(if (on) secondaryContainer else surfaceContainerHighest)
-                    cornerRadii = floatArrayOf(start, start, end, end, end, end, start, start)
-                }
                 val fg = if (on) onSecondaryContainer else onSurfaceVariant
+                val fill = ColorDrawable(if (on) secondaryContainer else Color.TRANSPARENT)
                 b.imageTintList = ColorStateList.valueOf(fg)
-                b.background = InsetDrawable(RippleDrawable(ColorStateList.valueOf(alpha(fg, 0.12f)), shape, null), 0, dp(4), 0, dp(4))
+                b.background = RippleDrawable(ColorStateList.valueOf(alpha(fg, 0.12f)), fill, ColorDrawable(Color.WHITE))
                 b.isSelected = on
                 b.stateDescription = if (on) "Selected" else null
             }

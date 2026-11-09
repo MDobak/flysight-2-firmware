@@ -14,9 +14,6 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
-import android.view.WindowInsetsController
-import android.window.OnBackInvokedCallback
-import android.window.OnBackInvokedDispatcher
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.example.flysightstatus.Ui.Companion.MATCH
@@ -26,7 +23,6 @@ import java.io.File
 /**
  * Chart and map of one or more saved tracks. A button group in the top bar shows
  * the chart, both, or the map. Drag the handle between them to change the sizes.
- * Fullscreen hides the top bar, the legend, and the system bars.
  */
 class TrackActivity : Activity() {
 
@@ -36,12 +32,6 @@ class TrackActivity : Activity() {
     private lateinit var split: SplitLayout
     private lateinit var bar: Ui.TopBar
     private lateinit var layoutGroup: Ui.IconToggleGroup
-    private lateinit var fullscreenButton: View
-    private lateinit var exitFullscreen: View
-    private var fullscreen = false
-    private var insetTop = 0
-    private var insetEnd = 0
-    private val exitFullscreenCallback = OnBackInvokedCallback { setFullscreen(false) }
     private lateinit var progress: View
     private lateinit var controls: LinearLayout
     private lateinit var snackbars: Ui.SnackbarHost
@@ -79,14 +69,12 @@ class TrackActivity : Activity() {
         }
 
         layoutGroup = ui.IconToggleGroup(listOf(
-            R.drawable.ic_chart to "Chart only",
-            R.drawable.ic_split to "Chart and map",
-            R.drawable.ic_map to "Map only",
+            R.drawable.ic_layout_chart to "Chart only",
+            R.drawable.ic_layout_both to "Chart and map",
+            R.drawable.ic_layout_map to "Map only",
         ), split.mode.ordinal) { setMode(SplitLayout.Mode.entries[it]) }
         updateSplitIcon()
         bar.addAction(layoutGroup)
-        fullscreenButton = ui.iconButton(R.drawable.ic_fullscreen, "Fullscreen") { setFullscreen(true) }
-        bar.addAction(fullscreenButton)
         bar.addAction(ui.iconButton(R.drawable.ic_info, "Jump details") { showDetails() })
 
         progress = ui.linearProgress().apply { isIndeterminate = true }
@@ -99,21 +87,13 @@ class TrackActivity : Activity() {
             addView(controls, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(split, LinearLayout.LayoutParams(MATCH, 0, 1f))
         }
-        exitFullscreen = ui.mapButton(R.drawable.ic_fullscreen_exit, "Exit fullscreen") { setFullscreen(false) }
-            .apply { visibility = View.GONE }
-        val frame = FrameLayout(this).apply {
-            addView(root)
-            addView(exitFullscreen, FrameLayout.LayoutParams(ui.dp(48), ui.dp(48), Gravity.TOP or Gravity.END))
-        }
+        val frame = FrameLayout(this).apply { addView(root) }
         snackbars = ui.SnackbarHost(frame)
         frame.setOnApplyWindowInsetsListener { _, insets ->
             val sys = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-            // The top bar uses the top inset. In fullscreen the top bar is not there.
-            insetTop = sys.top
-            insetEnd = sys.right
-            root.setPadding(sys.left, if (fullscreen) sys.top else 0, sys.right, sys.bottom)
+            // The top bar uses the top inset
+            root.setPadding(sys.left, 0, sys.right, sys.bottom)
             snackbars.bottomMarginPx = sys.bottom
-            updateOverlays()
             insets
         }
         setContentView(frame)
@@ -124,46 +104,18 @@ class TrackActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         split.vertical = newConfig.orientation != Configuration.ORIENTATION_LANDSCAPE
         updateSplitIcon()
-        updateOverlays()
     }
 
-    /** The split icon shows panes above each other. In landscape the panes are side by side. */
+    /** The split icon shows the chart above the map. In landscape the panes are side by side. */
     private fun updateSplitIcon() {
-        layoutGroup.buttons[SplitLayout.Mode.BOTH.ordinal].rotation = if (split.vertical) 0f else 90f
+        layoutGroup.buttons[SplitLayout.Mode.BOTH.ordinal]
+            .setImageResource(if (split.vertical) R.drawable.ic_layout_both else R.drawable.ic_layout_both_side)
     }
 
     private fun setMode(mode: SplitLayout.Mode) {
         split.mode = mode
         if (layoutGroup.selected != mode.ordinal) layoutGroup.select(mode.ordinal)
         prefs.edit().putInt(PREF_MODE, mode.ordinal).apply()
-        updateOverlays()
-    }
-
-    private fun setFullscreen(on: Boolean) {
-        if (fullscreen == on) return
-        fullscreen = on
-        bar.visibility = if (on) View.GONE else View.VISIBLE
-        controls.visibility = if (on || tracks.isEmpty()) View.GONE else View.VISIBLE
-        exitFullscreen.visibility = if (on) View.VISIBLE else View.GONE
-        val insetsController = window.decorView.windowInsetsController
-        if (on) {
-            insetsController?.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            insetsController?.hide(WindowInsets.Type.systemBars())
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, exitFullscreenCallback)
-        } else {
-            insetsController?.show(WindowInsets.Type.systemBars())
-            onBackInvokedDispatcher.unregisterOnBackInvokedCallback(exitFullscreenCallback)
-        }
-        window.decorView.requestApplyInsets()
-        updateOverlays()
-    }
-
-    /** Put the exit button in the top-end corner. Move the chart down when the button is above it. */
-    private fun updateOverlays() {
-        (exitFullscreen.layoutParams as FrameLayout.LayoutParams).setMargins(0, insetTop + ui.dp(4), insetEnd + ui.dp(4), 0)
-        exitFullscreen.requestLayout()
-        val chartUnderButton = split.mode != SplitLayout.Mode.SECOND && (split.vertical || split.mode == SplitLayout.Mode.FIRST)
-        chart.extraTop = if (fullscreen && chartUnderButton) ui.dpf(40f) else 0f
     }
 
     private fun load() {
@@ -216,7 +168,7 @@ class TrackActivity : Activity() {
             }
             controls.addView(ui.chipRow(*trackChips.toTypedArray()))
         }
-        controls.visibility = if (fullscreen) View.GONE else View.VISIBLE
+        controls.visibility = View.VISIBLE
     }
 
     private fun showDetails() {
