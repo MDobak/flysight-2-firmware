@@ -14,6 +14,7 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 
 | File | Function |
 |------|----------|
+| `Audio/original/` | The sound files of the `/AUDIO` folder on the microSD card of the FlySight (24 kHz, mono, 16-bit, 44-byte header). |
 | `FlySight/alt_ref.c/h` | Altitude reference: ground level (zero), barometer height, and `Alt_Source`. |
 | `FlySight/config_ext.c/h` | Fork configuration keys (`Alt_Source`, `Alt_Zero`, `Alt_Format`). |
 | `FlySight/device_state_ext.c/h` | Fork `DS_Control_Point` commands. |
