@@ -535,9 +535,14 @@ void FS_ReplayMode_Init(void)
 	FS_LED_SetColour(FS_LED_GREEN);
 	FS_LED_Pulse();
 
-	/* Start with no ground level. Keep the zero of the real jump for later. */
+	/* Keep the zero of the real jump for later. To set the ground level from
+	   the track, start with no ground level. Else use the ground level of the
+	   FlySight. */
 	savedZero = *FS_AltRef_GetZero();
-	FS_AltRef_RestoreZero(&noZero);
+	if (flags & (FS_REPLAY_FLAG_ZERO | FS_REPLAY_FLAG_LANDING))
+	{
+		FS_AltRef_RestoreZero(&noZero);
+	}
 	FS_AltRef_Start();
 
 	UTIL_SEQ_RegTask(1<<CFG_TASK_FS_REPLAY_ID, UTIL_SEQ_RFU, replayTask);
