@@ -22,6 +22,9 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 | `FlySight/sensor_ble.c/h` | `SD_Sensor_Measurement` packets and the BLE task. |
 | `FlySight/sensor_mode.c/h` | Sensor mode. |
 | `FlySight/tone_ext.c/h` | The change of value 1 for `Mode_2: 9` (slope of the last second). No hardware. |
+| `Audio/voice1/`, `Audio/voice1-1.25/` | New sound files, at 1.0 and 1.25 speed: the TTS model Fish Audio Drama 3, with the voice of `Audio/original/`. |
+| `Audio/voice2/`, `Audio/voice2-1.25/` | New sound files, at 1.0 and 1.25 speed: the TTS model Fish Audio Drama 3, with the voice of a male reader of LibriTTS-R (speaker 2078). |
+| `Audio/voice3/`, `Audio/voice3-1.25/` | New sound files, at 1.0 and 1.25 speed: the macOS voice Samantha. |
 | `Audio/words.tsv` | The words of the new sound files. |
 | `Scripts/build.sh`, `Scripts/make_sfb.py` | Build without STM32CubeIDE, and make `APP.SFB`. |
 
