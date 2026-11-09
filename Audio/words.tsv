@@ -31,6 +31,9 @@
 ALT	alti
 BASE	base
 BEARING	bearing
+BRAKEOFF	brake off
+DECISION	decision altitude
+DEPLOY	deploy
 DIRECTN	direction
 DISTANCE	distance
 DIVE	dive
