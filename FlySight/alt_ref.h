@@ -62,6 +62,11 @@ void FS_AltRef_UpdateGNSS(const FS_GNSS_Data_t *data, bool auto_zero);
    FS_ALT_REF_BARO flags of the parts that were set. */
 uint8_t FS_AltRef_SetZero(void);
 
+/* Set the parts in mask (FS_ALT_REF_GNSS, FS_ALT_REF_BARO) to the values
+   (ground_hmsl in mm, ground_pressure in Pa * 100). Returns the flags of
+   the parts that were set. */
+uint8_t FS_AltRef_SetZeroValues(uint8_t mask, int32_t ground_hmsl, int32_t ground_pressure);
+
 const FS_AltRef_Zero_t *FS_AltRef_GetZero(void);
 
 /* Height above the ground (mm) from the altitude source (0 = GNSS,

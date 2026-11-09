@@ -200,6 +200,8 @@ data class AltZero(
     /** From the last configuration that the firmware read. */
     val altSource: Int,
     val altZero: Int,
+    /** DZ_Elev (m) of the last configuration. Null for old firmware. */
+    val dzElevM: Double?,
 ) {
     val hasGnss get() = flags and GNSS != 0
     val hasBaro get() = flags and BARO != 0
@@ -212,7 +214,8 @@ data class AltZero(
 
         fun parse(data: ByteArray): AltZero? = try {
             val r = PacketReader(data)
-            AltZero(r.u8(), r.u8(), r.s32() / 1000.0, r.s32() / 100.0, r.u8(), r.u8())
+            AltZero(r.u8(), r.u8(), r.s32() / 1000.0, r.s32() / 100.0, r.u8(), r.u8(),
+                if (r.remaining >= 4) r.s32() / 1000.0 else null)
         } catch (_: Exception) {
             null
         }

@@ -287,6 +287,32 @@ uint8_t FS_AltRef_SetZero(void)
 	return set;
 }
 
+uint8_t FS_AltRef_SetZeroValues(uint8_t mask, int32_t ground_hmsl, int32_t ground_pressure)
+{
+	uint8_t set = 0;
+
+	if (mask & FS_ALT_REF_GNSS)
+	{
+		zero.ground_hmsl = ground_hmsl;
+		set |= FS_ALT_REF_GNSS;
+	}
+
+	if ((mask & FS_ALT_REF_BARO) && (ground_pressure > 0))
+	{
+		zero.ground_pressure = ground_pressure;
+		set |= FS_ALT_REF_BARO;
+	}
+
+	if (set)
+	{
+		zero.flags = (zero.flags | set) & ~FS_ALT_REF_AUTO;
+		++epoch;
+		still = false;
+	}
+
+	return set;
+}
+
 const FS_AltRef_Zero_t *FS_AltRef_GetZero(void)
 {
 	return &zero;

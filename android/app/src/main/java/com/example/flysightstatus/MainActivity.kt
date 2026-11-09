@@ -600,7 +600,8 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         c.write(service, characteristic, packet)
     }
 
-    fun sendDs(opcode: Int) = sendControl(P.DEVICE_STATE_SERVICE, P.DS_CONTROL_POINT, "DS", P.DS_COMMAND_NAMES, opcode)
+    fun sendDs(opcode: Int, vararg params: Int) =
+        sendControl(P.DEVICE_STATE_SERVICE, P.DS_CONTROL_POINT, "DS", P.DS_COMMAND_NAMES, opcode, *params)
 
     // ---- Mode changes ----
 

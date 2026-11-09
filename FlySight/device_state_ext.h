@@ -34,7 +34,8 @@
 
 #include <stdint.h>
 
-#define DS_CMD_SET_ALT_ZERO    0x16 // Payload: (none). Active or sensor mode only.
+#define DS_CMD_SET_ALT_ZERO    0x16 // Payload: (none) = from the sensors, active or sensor mode only;
+                                    // or uint8 parts, int32 ground hMSL (mm), int32 ground pressure (Pa*100)
                                     // Response Data: see alt_zero_response()
 #define DS_CMD_GET_ALT_ZERO    0x17 // Payload: (none)
                                     // Response Data: see alt_zero_response()

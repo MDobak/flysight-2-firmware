@@ -105,12 +105,12 @@ A sensor that has no new value since the last packet is not in the packet. Keep 
 ### `DS_Control_Point` commands
 
 - `0x15` (`DS_CMD_REQUEST_SENSOR`): Request sensor mode. Accepted only from sleep.
-- `0x16` (`DS_CMD_SET_ALT_ZERO`): Set the ground level (zero) for the altitude alarms, windows, and calls to the current position. Accepted only in active and sensor mode. Payload: none.
-  - The GNSS part is set if the last 10 GNSS measurements had a 3D fix and a vertical accuracy better than 10 m.
-  - The barometer part is set after 10 barometer averages.
+- `0x16` (`DS_CMD_SET_ALT_ZERO`): Set the ground level (zero) for the altitude alarms, windows, and calls.
+  - Payload none: set the two parts to the current position. Accepted only in active and sensor mode. The GNSS part is set if the last 10 GNSS measurements had a 3D fix and a vertical accuracy better than 10 m. The barometer part is set after 10 barometer averages.
+  - Payload 9 bytes: set the parts to the values. Accepted in all modes. `uint8` parts to set (`0x01` GNSS, `0x02` barometer), `int32` GNSS ground level (mm above sea level), `int32` ground pressure (Pa × 100). The firmware ignores the value of a part that is not in the parts byte. A ground pressure of 0 or less is not set.
 - `0x17` (`DS_CMD_GET_ALT_ZERO`): Get the ground level. Accepted in all modes. Payload: none.
 
-Response data of `0x16` and `0x17` (12 bytes, little-endian):
+Response data of `0x16` and `0x17` (16 bytes, little-endian):
 
 | Offset | Type | Value |
 |--------|------|-------|
@@ -120,6 +120,7 @@ Response data of `0x16` and `0x17` (12 bytes, little-endian):
 | 6 | `int32` | Ground pressure (Pa × 100). |
 | 10 | `uint8` | `Alt_Source` of the last configuration that the firmware read. |
 | 11 | `uint8` | `Alt_Zero` of the last configuration that the firmware read. |
+| 12 | `int32` | `DZ_Elev` of the last configuration that the firmware read (mm). |
 
 Notes:
 

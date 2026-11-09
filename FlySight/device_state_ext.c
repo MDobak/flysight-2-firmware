@@ -39,14 +39,21 @@ static void put_i32(uint8_t *buf, int32_t value)
     buf[3] = (uint8_t)(v >> 24);
 }
 
-/* Response data for the altitude zero commands (12 bytes, little-endian):
+/* Response data for the altitude zero commands (16 bytes, little-endian):
  *   [0]     Parts set by this command (FS_ALT_REF_GNSS | FS_ALT_REF_BARO)
  *   [1]     Zero flags (FS_ALT_REF_GNSS | FS_ALT_REF_BARO | FS_ALT_REF_AUTO)
  *   [2..5]  GNSS ground level (mm above sea level)
  *   [6..9]  Ground pressure (Pa * 100)
  *   [10]    Alt_Source of the last configuration read
  *   [11]    Alt_Zero of the last configuration read
+ *   [12..15] DZ_Elev of the last configuration read (mm)
  */
+static int32_t get_i32(const uint8_t *buf)
+{
+    return (int32_t)((uint32_t)buf[0] | ((uint32_t)buf[1] << 8) |
+                     ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24));
+}
+
 static uint8_t alt_zero_response(uint8_t set, uint8_t *buf)
 {
     const FS_AltRef_Zero_t *zero = FS_AltRef_GetZero();
@@ -57,16 +64,25 @@ static uint8_t alt_zero_response(uint8_t set, uint8_t *buf)
     put_i32(&buf[6], zero->ground_pressure);
     buf[10] = FS_ConfigExt_Get()->alt_source;
     buf[11] = FS_ConfigExt_Get()->alt_zero;
-    return 12;
+    put_i32(&buf[12], FS_Config_Get()->dz_elev);
+    return 16;
 }
 
 uint8_t DeviceStateExt_Handle(uint8_t opcode, const uint8_t *params, uint8_t params_len,
                               uint8_t *response, uint8_t *response_len)
 {
-    (void)params;
-
     switch (opcode) {
         case DS_CMD_SET_ALT_ZERO:
+            if (params_len == 9) {
+                /* Values from the app. Accepted in all modes. */
+                const uint8_t mask = params[0];
+                if ((mask == 0) || (mask & ~(FS_ALT_REF_GNSS | FS_ALT_REF_BARO))) {
+                    return CP_STATUS_INVALID_PARAMETER;
+                }
+                *response_len = alt_zero_response(
+                    FS_AltRef_SetZeroValues(mask, get_i32(&params[1]), get_i32(&params[5])), response);
+                return CP_STATUS_SUCCESS;
+            }
             if (params_len != 0) {
                 return CP_STATUS_INVALID_PARAMETER;
             }
