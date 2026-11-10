@@ -1,0 +1,21 @@
+# Docker build context of web/Dockerfile. Send only the files that the
+# image needs.
+*
+!.cproject
+!STM32WB5MMGHX_FLASH.ld
+!Core/
+!Drivers/
+!FATFS/
+!FlySight/
+!Middlewares/
+!STM32_WPAN/
+!USB_Device/
+!Utilities/
+!Scripts/build.sh
+!Deploy/Public_Keys/
+!Audio/voice1/*.WAV
+!web/go.mod
+!web/*.go
+!web/index.html
+FlySight/version.h
+**/.DS_Store

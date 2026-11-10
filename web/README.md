@@ -35,6 +35,52 @@ Open <http://localhost:8080>.
 
 The server reads all files at the start. Start it again after a new build.
 
+## Docker
+
+The image has all files that the website needs: the server, the firmware
+(built in the image from the sources), the public keys and the sound files.
+The server listens on port 8080. It runs as a user without root rights.
+
+GitHub Actions (`.github/workflows/web-image.yml`) builds the image for
+`linux/amd64` and `linux/arm64` after each push to `mdobak/develop` or
+`mdobak/simulation`:
+
+| Branch | Image |
+|--------|-------|
+| `mdobak/develop` | `ghcr.io/mdobak/flysight-2-firmware-web:develop` |
+| `mdobak/simulation` | `ghcr.io/mdobak/flysight-2-firmware-web:simulation` |
+
+Each push also gets a tag with the short commit hash, for example `develop-3e64227`.
+
+Run the website on a server:
+
+```sh
+docker run -d --name flysight-web --restart unless-stopped -p 80:8080 \
+  ghcr.io/mdobak/flysight-2-firmware-web:develop
+```
+
+The website uses HTTP only. For HTTPS, put a reverse proxy (for example
+Caddy or nginx) in front of it.
+
+To get a new image, pull it and start the container again:
+
+```sh
+docker pull ghcr.io/mdobak/flysight-2-firmware-web:develop
+docker rm -f flysight-web
+# then the docker run command above
+```
+
+Build the image locally, from the root of the repository:
+
+```sh
+docker build -f web/Dockerfile --build-arg VERSION="$(git describe --tags --always)" -t flysight-web .
+```
+
+The image uses the same compiler as the local build (Arm GNU Toolchain
+13.3.Rel1). The compiled object files are the same. The linked
+`UserApp.bin` can be different by some bytes, because the C libraries in the
+macOS and Linux toolchain packages are not the same files.
+
 ## Test
 
 ```sh
