@@ -858,6 +858,16 @@ Custom_CRS_Packet_t *Custom_CRS_GetNextRxPacket(void)
   return ret;
 }
 
+// Fork: put back the last packet from Custom_CRS_GetNextRxPacket, so that the
+// next state can handle it. Call this before other packets are read.
+void Custom_CRS_UngetRxPacket(void)
+{
+  if (rx_read_index > 0)
+  {
+    --rx_read_index;
+  }
+}
+
 void Custom_GNSS_Update(const FS_GNSS_Data_t *current)
 {
   uint8_t length = GNSS_BLE_Build(current, gnss_pv_packet);

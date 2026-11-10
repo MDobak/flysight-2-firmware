@@ -376,6 +376,17 @@ static FS_CRS_State_t FS_CRS_State_Dir(void)
 			case FS_CRS_COMMAND_CANCEL:
 				next_state = FS_CRS_STATE_IDLE;
 				break;
+			case FS_CRS_COMMAND_FILE_ACK:
+			case FS_CRS_COMMAND_FILE_DATA:
+			case FS_CRS_COMMAND_NAK:
+			case FS_CRS_COMMAND_ACK:
+				// An old packet of an earlier transfer
+				break;
+			default:
+				// Fork: a new command stops the listing. The idle state handles it.
+				Custom_CRS_UngetRxPacket();
+				next_state = FS_CRS_STATE_IDLE;
+				break;
 			}
 		}
 	}
@@ -463,8 +474,24 @@ static FS_CRS_State_t FS_CRS_State_Read(void)
 
 						// Reset timeout timer
 						HW_TS_Start(ack_timer_id, TX_TIMEOUT_TICKS);
+
+						// Fork: the read is complete. Do not read the next
+						// packet here, because it can be a new command.
+						if (next_ack == last_packet)
+						{
+							next_state = FS_CRS_STATE_IDLE;
+						}
 					}
 				}
+				break;
+			case FS_CRS_COMMAND_FILE_DATA:
+			case FS_CRS_COMMAND_NAK:
+			case FS_CRS_COMMAND_ACK:
+				break;
+			default:
+				// Fork: a new command stops the read. The idle state handles it.
+				Custom_CRS_UngetRxPacket();
+				next_state = FS_CRS_STATE_IDLE;
 				break;
 			}
 		}
@@ -594,7 +621,16 @@ static FS_CRS_State_t FS_CRS_State_Write(void)
 
 static void FS_CRS_Update(void)
 {
+	FS_CRS_State_t prev_state = state;
+
 	state = state_table[state]();
+
+	// Fork: after a return to idle, handle the packets that are in the queue.
+	// No new packet calls the update task for them.
+	if ((state == FS_CRS_STATE_IDLE) && (prev_state != FS_CRS_STATE_IDLE))
+	{
+		state = state_table[state]();
+	}
 }
 
 static void FS_CRS_Timeout(void)

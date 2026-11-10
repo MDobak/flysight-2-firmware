@@ -83,6 +83,7 @@ void Custom_APP_TxPoolAvailableNotification(void);
 uint8_t Custom_APP_IsConnected(void);
 
 Custom_CRS_Packet_t *Custom_CRS_GetNextRxPacket(void);
+void Custom_CRS_UngetRxPacket(void);
 
 void Custom_GNSS_Update(const FS_GNSS_Data_t *current);
 

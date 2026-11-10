@@ -2,6 +2,7 @@ package com.mdobak.flysightstatus
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import com.mdobak.flysightstatus.FlySightProtocol as P
@@ -13,6 +14,15 @@ import com.mdobak.flysightstatus.FlySightProtocol as P
  * notifications on FT_Packet_Out, which the caller must enable and pass to
  * [onPacketOut]. File data uses Go-Back-N with a window of 8 packets.
  * Only one operation can run at a time. All calls must be on the main thread.
+ *
+ * The firmware can lose a command:
+ * - In the read state, it discards all packets other than FILE_ACK and CANCEL.
+ *   If the last ACK of a read and the next command arrive together, it
+ *   discards the command.
+ * - After a CANCEL, a command in its queue waits until the next packet comes.
+ * Thus, after a read or a failure, the app waits [SETTLE_MS] before the next
+ * command. If a list or read command gets no ACK, the app sends CANCEL and
+ * sends the command one more time.
  */
 class FileTransfer(
     private val connection: FlySightConnection,
@@ -21,15 +31,18 @@ class FileTransfer(
     private val handler = Handler(Looper.getMainLooper())
     private var op: Op<*>? = null
 
+    /** The time (uptime ms) before which the app must not send a command. */
+    private var quietUntil = 0L
+
     val busy: Boolean get() = op != null
 
     fun list(path: String, done: (Result<List<FileInfo>>) -> Unit) =
-        start(ListOp(done), byteArrayOf(P.FT_LIST.toByte()) + path.encodePath())
+        start(ListOp(done).apply { commandRetries = 1 }, byteArrayOf(P.FT_LIST.toByte()) + path.encodePath())
 
     fun read(path: String, progress: (Int) -> Unit, done: (Result<ByteArray>) -> Unit) {
         // [0x02] [offset multiplier u32] [stride-1 multiplier u32] [path]
         val header = byteArrayOf(P.FT_READ.toByte(), 0, 0, 0, 0, 0, 0, 0, 0)
-        start(ReadOp(progress, done), header + path.encodePath())
+        start(ReadOp(progress, done).apply { commandRetries = 1 }, header + path.encodePath())
     }
 
     fun write(path: String, data: ByteArray, progress: (Int, Int) -> Unit, done: (Result<Unit>) -> Unit) =
@@ -45,6 +58,7 @@ class FileTransfer(
     fun cancel() {
         val current = op ?: return
         send(byteArrayOf(P.FT_CANCEL.toByte()))
+        quiet()
         current.fail("Cancelled")
     }
 
@@ -72,10 +86,11 @@ class FileTransfer(
             }
             P.FT_NAK -> if (current != null) current.onNak(arg)
             else log(String.format("FT: NAK 0x%02X", arg))
-            P.FT_FILE_DATA -> if (current is ReadOp) current.onData(value)
-            // A lost ACK makes the FlySight send the end packet again. Acknowledge it, or it never stops.
+            P.FT_FILE_DATA -> if (current is ReadOp && current.acknowledged) current.onData(value)
+            // Data of an earlier read: a lost ACK makes the FlySight send packets again.
+            // Acknowledge them, or it never stops.
             else if (arg >= 0) send(byteArrayOf(P.FT_FILE_ACK.toByte(), arg.toByte()))
-            P.FT_FILE_INFO -> if (current is ListOp) current.onInfo(value)
+            P.FT_FILE_INFO -> if (current is ListOp && current.acknowledged) current.onInfo(value)
             P.FT_FILE_ACK -> if (current is WriteOp) current.onFileAck(arg)
             else -> log(String.format("FT: unknown packet 0x%02X", type))
         }
@@ -87,8 +102,15 @@ class FileTransfer(
             return
         }
         op = newOp
-        send(command)
-        newOp.armTimer(COMMAND_TIMEOUT_MS)
+        newOp.commandPacket = command
+        val wait = quietUntil - SystemClock.uptimeMillis()
+        if (wait > 0) handler.postDelayed({ if (op === newOp) newOp.sendCommand() }, wait)
+        else newOp.sendCommand()
+    }
+
+    /** Do not send a command for [SETTLE_MS], so that the FlySight can go back to idle. */
+    private fun quiet() {
+        quietUntil = SystemClock.uptimeMillis() + SETTLE_MS
     }
 
     private fun send(packet: ByteArray) =
@@ -103,7 +125,16 @@ class FileTransfer(
 
     private abstract inner class Op<T>(val command: Int, private val done: (Result<T>) -> Unit) {
         var acknowledged = false
+        lateinit var commandPacket: ByteArray
+
+        /** How many times the app can send the command again if it gets no ACK. Only for commands with no side effects. */
+        var commandRetries = 0
         private val timer = Runnable { onTimeout() }
+
+        fun sendCommand() {
+            send(commandPacket)
+            armTimer(if (commandRetries > 0) RETRY_COMMAND_TIMEOUT_MS else COMMAND_TIMEOUT_MS)
+        }
 
         fun armTimer(ms: Long) {
             handler.removeCallbacks(timer)
@@ -119,6 +150,7 @@ class FileTransfer(
         private fun complete(result: Result<T>) {
             handler.removeCallbacks(timer)
             if (op === this) op = null
+            if (result.isFailure || this is ReadOp) quiet()
             done(result)
         }
 
@@ -134,6 +166,14 @@ class FileTransfer(
 
         open fun onTimeout() {
             send(byteArrayOf(P.FT_CANCEL.toByte()))
+            if (!acknowledged && commandRetries > 0) {
+                // The FlySight lost the command, or it was busy with an earlier operation
+                commandRetries--
+                log(String.format("FT: no ACK for command 0x%02X, send it again", command))
+                handler.removeCallbacks(timer)
+                handler.postDelayed({ if (op === this) sendCommand() }, SETTLE_MS)
+                return
+            }
             fail("No answer from the FlySight")
         }
     }
@@ -170,8 +210,8 @@ class FileTransfer(
         fun onData(packet: ByteArray) {
             if (packet.size < 2) return
             val counter = packet[1].toInt() and 0xff
-            armTimer(DATA_TIMEOUT_MS)
             if (counter == (expected and 0xff)) {
+                armTimer(DATA_TIMEOUT_MS)
                 ack(counter)
                 expected++
                 if (packet.size == 2) {
@@ -185,7 +225,8 @@ class FileTransfer(
                 // A packet again: the FlySight did not get our ACK. Send it again.
                 ack(counter)
             }
-            // Other packets are out of order. Go-Back-N sends them again.
+            // Other packets are out of order. Go-Back-N sends them again. They do
+            // not reset the timer, thus a read with no progress stops.
         }
 
         private fun ack(counter: Int) = send(byteArrayOf(P.FT_FILE_ACK.toByte(), counter.toByte()))
@@ -260,6 +301,8 @@ class FileTransfer(
 
     private companion object {
         const val COMMAND_TIMEOUT_MS = 5_000L
+        const val RETRY_COMMAND_TIMEOUT_MS = 2_500L
+        const val SETTLE_MS = 300L
         const val DATA_TIMEOUT_MS = 5_000L
         const val WRITE_ACK_TIMEOUT_MS = 2_000L
         const val MAX_RETRIES = 8
