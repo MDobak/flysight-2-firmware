@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed launcher icon: Android uses only the alpha of this layer -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A wingsuit flyer, seen from above -->
+    <group
+        android:pivotX="54"
+        android:pivotY="56"
+        android:scaleX="0.82"
+        android:scaleY="0.82"
+        android:translateY="-9">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M48.8,30 a5.2,5.2 0 1,0 10.4,0 a5.2,5.2 0 1,0 -10.4,0 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M50,37.5 C44,38.5 32,42 25,47 Q22.5,49.5 25.5,51.5 C34,54 43,58 47,65 L46.5,77 Q47,80 50,78.6 L54,75.5 L58,78.6 Q61,80 61.5,77 L61,65 C65,58 74,54 82.5,51.5 Q85.5,49.5 83,47 C76,42 64,38.5 58,37.5 Q54,36.5 50,37.5 Z" />
+    </group>
+    <!-- The GPS track behind the flyer -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M51.6,72.5 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0 Z M52.1,78.5 a1.9,1.9 0 1,0 3.8,0 a1.9,1.9 0 1,0 -3.8,0 Z M52.6,83.8 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z" />
+</vector>
