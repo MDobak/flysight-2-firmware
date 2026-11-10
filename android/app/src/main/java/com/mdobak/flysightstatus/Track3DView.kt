@@ -132,7 +132,7 @@ class Track3DPane(context: Context, private val ui: Ui) : FrameLayout(context) {
     private fun update() {
         credits.text = view.style.credit
         credits.visibility = VISIBLE
-        scaleLabel.text = "Height ×${view.heightScale.toInt()}"
+        scaleLabel.text = if (view.heightScale == 0f) "Flat terrain" else "Height ×${view.heightScale.toInt()}"
         scaleLabel.visibility = if (view.heightScale == 1f) GONE else VISIBLE
     }
 
@@ -179,7 +179,8 @@ class Track3DPane(context: Context, private val ui: Ui) : FrameLayout(context) {
             prefs.edit().putFloat(PREF_SCALE, SCALES[it]).apply()
             update()
         }.apply { setPadding(ui.dp(24), 0, ui.dp(24), 0) })
-        content.addView(ui.note("A larger scale makes the terrain and the jump higher than they are. Use it to see flat terrain.")
+        content.addView(ui.note("A larger scale makes the terrain and the jump higher than they are. Use it to see flat terrain. " +
+            "At 0×, the terrain is flat at the landing height, and the jump has its true height.")
             .apply { setPadding(ui.dp(24), ui.dp(4), ui.dp(24), 0) })
         ui.dialog("3D view", content = content, positive = Ui.DialogButton("Close"), negative = null, scrollContent = true).show()
     }
@@ -238,7 +239,7 @@ class Track3DPane(context: Context, private val ui: Ui) : FrameLayout(context) {
         private const val PREFS = "track_viewer"
         private const val PREF_STYLE = "map_3d_style"
         private const val PREF_SCALE = "map_3d_scale"
-        private val SCALES = listOf(1f, 2f, 3f)
+        private val SCALES = listOf(0f, 1f, 2f, 3f)
         private const val CREDITS =
             "Satellite: Sentinel-2 cloudless 2025, https://cloudless.eox.at, by EOX IT Services GmbH " +
                 "(contains modified Copernicus Sentinel data 2025), CC BY-NC-SA 4.0.\n\n" +
@@ -269,15 +270,32 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
     /** Called with the heading of the camera (degrees clockwise from north). */
     var onHeading: ((Float) -> Unit)? = null
 
-    /** The height scale: 1 is true scale. */
+    /**
+     * The height scale: 1 is true scale. At 0, the terrain is flat at the
+     * landing height, and the tracks have their true height.
+     */
     var heightScale = 1f
         set(value) {
             if (value == field) return
             val old = field
             field = value
-            camera.targetY *= value / old
-            requestRender()
+            stopAnimation()
+            val s = scene
+            val p = if (follow) cursorTime?.let { cursorPoint(it) } else null
+            when {
+                p != null -> camera.targetY = p[1] * trackScale
+                old > 0 && value > 0 -> camera.targetY *= value / old
+                // The target goes to the ground
+                s != null -> camera.targetY = groundY(s, s.groundAt(camera.targetX, camera.targetZ))
+            }
+            cameraChanged()
         }
+
+    /** The height scale of the tracks. */
+    private val trackScale get() = if (heightScale == 0f) 1f else heightScale
+
+    /** The scene height of the terrain with the height [h] (m above the scene base). */
+    private fun groundY(s: Scene, h: Float) = if (heightScale == 0f) s.level else h * heightScale
 
     var style = MapStyle.SATELLITE
         set(value) {
@@ -299,7 +317,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             if (!value) return
             val p = cursorTime?.let { cursorPoint(it) } ?: return
             val to = camera.copy().apply {
-                targetX = p[0]; targetY = p[1] * heightScale; targetZ = p[2]
+                targetX = p[0]; targetY = p[1] * trackScale; targetZ = p[2]
             }
             animateTo(to, 350)
             followTo = to
@@ -351,7 +369,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
                 val to = followTo
                 val c = if (to != null && animation != null) to else camera
                 c.targetX = p[0]
-                c.targetY = p[1] * heightScale
+                c.targetY = p[1] * trackScale
                 c.targetZ = p[2]
                 if (c === camera) cameraChanged()
             }
@@ -381,7 +399,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             if (p.index in hidden) continue
             for (i in 0 until p.count) {
                 val x = p.xyz[3 * i].toDouble()
-                val y = p.xyz[3 * i + 1].toDouble() * heightScale
+                val y = p.xyz[3 * i + 1].toDouble() * trackScale
                 val z = p.xyz[3 * i + 2].toDouble()
                 minX = min(minX, x); maxX = max(maxX, x)
                 minY = min(minY, y); maxY = max(maxY, y)
@@ -512,7 +530,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
         val x = camera.targetX + d * cp * sin(camera.yaw)
         var y = camera.targetY + d * sin(camera.pitch)
         val z = camera.targetZ + d * cp * cos(camera.yaw)
-        scene?.let { y = max(y, it.groundAt(x, z) * heightScale + MIN_EYE_HEIGHT) }
+        scene?.let { y = max(y, groundY(it, it.groundAt(x, z)) + MIN_EYE_HEIGHT) }
         return floatArrayOf(x, y, z)
     }
 
@@ -523,7 +541,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
         Matrix.setLookAtM(view, 0, e[0], e[1], e[2], camera.targetX, camera.targetY, camera.targetZ, 0f, 1f, 0f)
         val size = scene?.size ?: 10_000f
         // Near the ground, the near plane comes nearer, so that the terrain in front of the eye shows
-        val clearance = scene?.let { e[1] - it.groundAt(e[0], e[2]) * heightScale } ?: d
+        val clearance = scene?.let { e[1] - groundY(it, it.groundAt(e[0], e[2])) } ?: d
         val near = max(1f, min(d * 0.01f, clearance * 0.5f))
         Matrix.perspectiveM(projection, 0, FOV.toFloat(), max(w, 1).toFloat() / max(h, 1), near, d + size * 3)
     }
@@ -566,7 +584,6 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
      */
     private fun terrainHit(r: Ray): FloatArray? {
         val s = scene ?: return null
-        val k = heightScale
         val half = s.size / 2
         // The part of the ray above the square of the terrain
         var t0 = 0f
@@ -582,7 +599,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
         if (!slab(r.x, r.dx) || !slab(r.z, r.dz)) return null
         fun above(t: Float): Float {
             val p = r.at(t)
-            return p[1] - s.groundAt(p[0], p[2]) * k
+            return p[1] - groundY(s, s.groundAt(p[0], p[2]))
         }
         // The ray must come from above the terrain
         if (above(t0) <= 0) return null
@@ -1034,6 +1051,8 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
         /** Height MSL of y = 0 (m). */
         val base: Float,
         val maxHeight: Float,
+        /** The landing height (m, scene coordinates). At the height scale 0, the terrain is flat at this height. */
+        val level: Float,
         /** A problem to show, or null. */
         val problem: String?,
     ) {
@@ -1131,7 +1150,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
                 }
 
                 val scene = Scene(terrain, indices, heights, half, step, (side * metersPerUnit).toFloat(),
-                    x0, y0, side, base, heights.max(), if (elevation == null) "No terrain data" else null)
+                    x0, y0, side, base, heights.max(), landing - base, if (elevation == null) "No terrain data" else null)
                 for ((index, track) in tracks.withIndex()) {
                     val first = firsts[index]
                     val count = track.size - first
@@ -1454,7 +1473,10 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             GLES30.glClearColor(SKY[0], SKY[1], SKY[2], 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
             val s = uploaded ?: return
-            val scale = heightScale
+            // y = height × scale + offset. At the height scale 0, the terrain is flat.
+            val pathScale = trackScale
+            val groundScale = heightScale
+            val groundOffset = if (groundScale == 0f) s.level else 0f
             cameraMatrices(view, projection, viewWidth, viewHeight)
             Matrix.multiplyMM(mvp, 0, projection, 0, view, 0)
             val shown = shownStyle
@@ -1467,7 +1489,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             // Terrain
             val hasTexture = texture != 0 && shown.hasImage
             GLES30.glUseProgram(terrainProgram)
-            uniforms(terrainProgram, scale)
+            uniforms(terrainProgram, groundScale, groundOffset)
             GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(terrainProgram, "uView"), 1, false, view, 0)
             GLES30.glUniform3f(GLES30.glGetUniformLocation(terrainProgram, "uFog"), SKY[0], SKY[1], SKY[2])
             GLES30.glUniform1f(GLES30.glGetUniformLocation(terrainProgram, "uFogDensity"), 0.6f / s.size)
@@ -1493,7 +1515,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
 
             // Lines on the ground, a little above it, so that the terrain does not cover them
             GLES30.glUseProgram(lineProgram)
-            uniforms(lineProgram, scale)
+            uniforms(lineProgram, groundScale, groundOffset)
             GLES30.glUniform2f(GLES30.glGetUniformLocation(lineProgram, "uViewport"), viewWidth.toFloat(), viewHeight.toFloat())
             val widthLocation = GLES30.glGetUniformLocation(lineProgram, "uWidth")
             val liftLocation = GLES30.glGetUniformLocation(lineProgram, "uLift")
@@ -1517,7 +1539,8 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             // Curtains: transparent, behind the lines
             GLES30.glDepthMask(false)
             GLES30.glUseProgram(flatProgram)
-            uniforms(flatProgram, scale)
+            uniforms(flatProgram, pathScale, 0f)
+            GLES30.glUniform2f(GLES30.glGetUniformLocation(flatProgram, "uGround"), groundScale, groundOffset)
             for (p in visible) {
                 color(flatProgram, trackColor(p.index), 0.22f)
                 GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, buffers[p.index]!!.curtain)
@@ -1529,6 +1552,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
 
             // Tracks: a light casing, then the colour
             GLES30.glUseProgram(lineProgram)
+            uniforms(lineProgram, pathScale, 0f)
             GLES30.glUniform1f(liftLocation, 0f)
             // The casing does not write depth. If it did, the colour line at almost the same
             // depth would fail the depth test at some pixels, and the line would have gaps.
@@ -1561,7 +1585,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             // Markers, on top of all: exit (a ring), landing (a dot), cursor
             GLES30.glDisable(GLES30.GL_DEPTH_TEST)
             GLES30.glUseProgram(pointProgram)
-            uniforms(pointProgram, scale)
+            uniforms(pointProgram, pathScale, 0f)
             val cursor = cursorTime
             for (p in visible) {
                 val c = trackColor(p.index)
@@ -1594,9 +1618,11 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             GLES30.glDrawArrays(GLES30.GL_POINTS, 0, 1)
         }
 
-        private fun uniforms(program: Int, scale: Float) {
+        /** The matrix, and the vertical scale and offset: y = height × [scale] + [offset]. */
+        private fun uniforms(program: Int, scale: Float, offset: Float) {
             GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(program, "uMvp"), 1, false, mvp, 0)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uScale"), scale)
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uOffset"), offset)
         }
 
         private fun color(program: Int, c: Int, alpha: Float) {
@@ -1663,12 +1689,13 @@ layout(location = 2) in vec2 aSlope;
 uniform mat4 uMvp;
 uniform mat4 uView;
 uniform float uScale;
+uniform float uOffset;
 out vec2 vUv;
 out float vShade;
 out float vDistance;
 out float vHeight;
 void main() {
-    vec4 p = vec4(aPos.x, aPos.y * uScale, aPos.z, 1.0);
+    vec4 p = vec4(aPos.x, aPos.y * uScale + uOffset, aPos.z, 1.0);
     gl_Position = uMvp * p;
     vec3 n = normalize(vec3(-aSlope.x * uScale, 1.0, -aSlope.y * uScale));
     // Light from the north-west, as on relief maps
@@ -1733,10 +1760,11 @@ layout(location = 2) in vec3 aNext;
 layout(location = 3) in float aSide;
 uniform mat4 uMvp;
 uniform float uScale;
+uniform float uOffset;
 uniform float uLift;
 uniform vec2 uViewport;
 uniform float uWidth;
-vec4 clip(vec3 a) { return uMvp * vec4(a.x, a.y * uScale + uLift, a.z, 1.0); }
+vec4 clip(vec3 a) { return uMvp * vec4(a.x, a.y * uScale + uOffset + uLift, a.z, 1.0); }
 void main() {
     vec4 c = clip(aPos);
     vec4 a = clip(aPrev);
@@ -1748,11 +1776,17 @@ void main() {
 }
 """
 
+        /** The curtain: the even vertices are on the track, the odd vertices on the ground ([uGround]: scale, offset). */
         private const val FLAT_VS = """#version 300 es
 layout(location = 0) in vec3 aPos;
 uniform mat4 uMvp;
 uniform float uScale;
-void main() { gl_Position = uMvp * vec4(aPos.x, aPos.y * uScale, aPos.z, 1.0); }
+uniform float uOffset;
+uniform vec2 uGround;
+void main() {
+    float y = gl_VertexID % 2 == 0 ? aPos.y * uScale + uOffset : aPos.y * uGround.x + uGround.y;
+    gl_Position = uMvp * vec4(aPos.x, y, aPos.z, 1.0);
+}
 """
 
         private const val FLAT_FS = """#version 300 es
@@ -1766,9 +1800,10 @@ void main() { color = uColor; }
 layout(location = 0) in vec3 aPos;
 uniform mat4 uMvp;
 uniform float uScale;
+uniform float uOffset;
 uniform float uSize;
 void main() {
-    gl_Position = uMvp * vec4(aPos.x, aPos.y * uScale, aPos.z, 1.0);
+    gl_Position = uMvp * vec4(aPos.x, aPos.y * uScale + uOffset, aPos.z, 1.0);
     gl_PointSize = uSize;
 }
 """
