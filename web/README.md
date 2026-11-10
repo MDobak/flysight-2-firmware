@@ -6,6 +6,8 @@ A small website in Go, with no dependencies outside the standard library.
   finds the hardware batch in `Deploy/Public_Keys`, and returns `APP.SFB` for
   this batch. It does not keep the uploaded file. The log shows only the batch.
 - `/audio.zip` gives the WAV files of `Audio/voice1` in the folder `AUDIO`.
+- `/flysight.apk` gives the Android app (`android/`), if you start the server
+  with `-apk`.
 - The page has a link to <https://flysight.ca/firmware/> for the official
   firmware and the original audio files.
 
@@ -32,18 +34,29 @@ Open <http://localhost:8080>.
 | `-keys` | `../Deploy/Public_Keys` | Folder with `pub_key_*.bin`. |
 | `-audio` | `../Audio/voice1` | Folder with the WAV files. |
 | `-version` | (empty) | The version text on the page. |
+| `-apk` | (empty) | APK of the Android app. If it is empty, the page has no app download. |
 
 The server reads all files at the start. Start it again after a new build.
 
 ## Docker
 
 The image has all files that the website needs: the server, the firmware
-(built in the image from the sources), the public keys and the sound files.
+(built in the image from the sources), the public keys, the sound files and
+the Android app (a debug build, also built in the image).
 The server listens on port 8080. It runs as a user without root rights.
 
 GitHub Actions (`.github/workflows/web-image.yml`) builds the image for
 `linux/amd64` and `linux/arm64` after each push to `mdobak/develop` or
-`mdobak/simulation`:
+`mdobak/simulation`. The repository secret `ANDROID_DEBUG_KEYSTORE` is the
+base64 text of the keystore that signs the app. All builds must use the same
+key, because Android updates an app only if the key is the same. To set the
+secret:
+
+```sh
+base64 -i ~/.android/debug.keystore | gh secret set ANDROID_DEBUG_KEYSTORE
+```
+
+Images:
 
 | Branch | Image |
 |--------|-------|
@@ -73,8 +86,13 @@ docker rm -f flysight-web
 Build the image locally, from the root of the repository:
 
 ```sh
-docker build -f web/Dockerfile --build-arg VERSION="$(git describe --tags --always)" -t flysight-web .
+docker build -f web/Dockerfile --build-arg VERSION="$(git describe --tags --always)" \
+  --secret id=android_keystore,src="$HOME/.android/debug.keystore" -t flysight-web .
 ```
+
+The Android build tools have Linux programs for x86-64 only. Thus the app
+always builds for `linux/amd64`. On an Arm computer, Docker uses emulation for
+this step, and the step is slow.
 
 The image uses the same compiler as the local build (Arm GNU Toolchain
 13.3.Rel1). The compiled object files are the same. The linked

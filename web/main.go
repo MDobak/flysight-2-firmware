@@ -1,5 +1,5 @@
 // A small website that makes APP.SFB for the FlySight 2 of the user, and
-// gives the audio files of this firmware.
+// gives the audio files of this firmware and the Android app.
 //
 // The user uploads FLYSIGHT.TXT. The server reads only the Pubkey_X line,
 // finds the hardware batch, and encrypts UserApp.bin for that batch. It does
@@ -46,6 +46,7 @@ type server struct {
 	firmwares []firmware
 	audioZip  []byte
 	audioN    int
+	apk       []byte
 	version   string
 }
 
@@ -61,6 +62,7 @@ func main() {
 	keysDir := flag.String("keys", "../Deploy/Public_Keys", "folder with pub_key_*.bin")
 	audioDir := flag.String("audio", "../Audio/voice1", "folder with the WAV files")
 	version := flag.String("version", buildVersion, "firmware version to show on the page")
+	apkFile := flag.String("apk", "", "APK of the Android app. Empty: the page has no app download")
 	flag.Var(&fwFlags, "firmware", "UserApp.bin as PATH or NAME=PATH. Use more than once for more firmware choices (default ../Release/UserApp.bin)")
 	flag.Parse()
 	if len(fwFlags) == 0 {
@@ -91,11 +93,18 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("%d batches, %d sound files", len(s.keys), s.audioN)
+	if *apkFile != "" {
+		if s.apk, err = os.ReadFile(*apkFile); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("app: %s, %d bytes", *apkFile, len(s.apk))
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("POST /firmware", s.firmware)
 	mux.HandleFunc("GET /audio.zip", s.audio)
+	mux.HandleFunc("GET /flysight.apk", s.app)
 	log.Printf("listening on http://%s", *addr)
 	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.ListenAndServe())
@@ -105,13 +114,18 @@ type pageData struct {
 	Version   string
 	Firmwares []firmware
 	AudioN    int
+	APKSize   string // empty if there is no APK
 	Error     string
 }
 
 func (s *server) render(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	if err := page.Execute(w, pageData{s.version, s.firmwares, s.audioN, msg}); err != nil {
+	apkSize := ""
+	if len(s.apk) > 0 {
+		apkSize = fmt.Sprintf("%.1f MB", float64(len(s.apk))/1e6)
+	}
+	if err := page.Execute(w, pageData{s.version, s.firmwares, s.audioN, apkSize, msg}); err != nil {
 		log.Print(err)
 	}
 }
@@ -183,6 +197,17 @@ func (s *server) audio(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="flysight-2-audio.zip"`)
 	w.Header().Set("Content-Length", fmt.Sprint(len(s.audioZip)))
 	w.Write(s.audioZip)
+}
+
+func (s *server) app(w http.ResponseWriter, r *http.Request) {
+	if len(s.apk) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
+	w.Header().Set("Content-Disposition", `attachment; filename="FlySight.apk"`)
+	w.Header().Set("Content-Length", fmt.Sprint(len(s.apk)))
+	w.Write(s.apk)
 }
 
 // makeAudioZip puts the WAV files of dir into the folder AUDIO of a ZIP file.

@@ -27,7 +27,7 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 | `Audio/voice3/`, `Audio/voice3-1.25/` | New sound files, at 1.0 and 1.25 speed: the macOS voice Samantha. |
 | `Audio/words.tsv` | The words of the new sound files. |
 | `Scripts/build.sh`, `Scripts/make_sfb.py` | Build without STM32CubeIDE, and make `APP.SFB`. |
-| `web/` | A website in Go: it makes `APP.SFB` from `FLYSIGHT.TXT`, and gives the new sound files as a ZIP file. `web/Dockerfile` makes an image with all files of the website. See `web/README.md`. |
+| `web/` | A website in Go: it makes `APP.SFB` from `FLYSIGHT.TXT`, and gives the new sound files as a ZIP file and the Android app. `web/Dockerfile` makes an image with all files of the website. See `web/README.md`. |
 | `.github/workflows/web-image.yml` | GitHub Actions: builds the website image and pushes it to `ghcr.io`. |
 
 ## Hooks in upstream files

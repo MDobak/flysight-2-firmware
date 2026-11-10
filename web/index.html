@@ -97,6 +97,20 @@
     <a class="button" href="/audio.zip" download>Download the audio files</a>
   </section>
 
+  {{if .APKSize}}
+  <section>
+    <h2>Android app</h2>
+    <p>The app connects to the FlySight over Bluetooth. Use it to see the live data, change the settings,
+      get your jumps and show them on a chart and a map, and install <code>APP.SFB</code>.</p>
+    <ol>
+      <li>On your Android phone (Android 13 or later), download the app.</li>
+      <li>Open the file. If Android asks, let your browser install unknown apps.</li>
+      <li>Install the app. To update it, download and install the new file. Your jumps and settings stay on the phone.</li>
+    </ol>
+    <a class="button" href="/flysight.apk" download>Download the app ({{.APKSize}})</a>
+  </section>
+  {{end}}
+
   <section>
     <h2>Original firmware and audio files</h2>
     <p>The official firmware and the original audio files are on the

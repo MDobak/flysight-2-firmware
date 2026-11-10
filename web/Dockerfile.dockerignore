@@ -17,5 +17,11 @@
 !web/go.mod
 !web/*.go
 !web/index.html
+!android/
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
 FlySight/version.h
 **/.DS_Store

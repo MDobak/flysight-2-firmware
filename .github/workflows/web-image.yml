@@ -1,5 +1,6 @@
 # Builds the website image (web/Dockerfile) and pushes it to the GitHub
-# container registry:
+# container registry. The secret ANDROID_DEBUG_KEYSTORE (base64) is the key
+# that signs the Android app in the image. Images:
 #   ghcr.io/<owner>/flysight-2-firmware-web:develop      (branch mdobak/develop)
 #   ghcr.io/<owner>/flysight-2-firmware-web:simulation   (branch mdobak/simulation)
 # Each push also gets a tag with the short commit hash, for example develop-3e64227.
@@ -8,7 +9,7 @@ name: Website image
 on:
   push:
     branches: [mdobak/develop, mdobak/simulation]
-    paths-ignore: ['android/**', 'Docs/**', 'Tests/**', '**/*.md']
+    paths-ignore: ['Docs/**', 'Tests/**', '**/*.md']
   workflow_dispatch:
 
 permissions:
@@ -50,6 +51,16 @@ jobs:
             echo "version=$(git describe --tags --always)"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Get the Android signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::error::Set the secret ANDROID_DEBUG_KEYSTORE (base64 of the debug keystore)."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/debug.keystore"
+
       - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
@@ -66,10 +77,11 @@ jobs:
           push: true
           tags: ${{ steps.names.outputs.tags }}
           build-args: VERSION=${{ steps.names.outputs.version }}
+          secret-files: android_keystore=${{ runner.temp }}/debug.keystore
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.names.outputs.version }}
-            org.opencontainers.image.description=FlySight 2 fork: APP.SFB from FLYSIGHT.TXT, and the new sound files
+            org.opencontainers.image.description=FlySight 2 fork: APP.SFB from FLYSIGHT.TXT, the new sound files, and the Android app
           cache-from: type=gha,scope=web-${{ steps.names.outputs.tag }}
           cache-to: type=gha,mode=max,scope=web-${{ steps.names.outputs.tag }}

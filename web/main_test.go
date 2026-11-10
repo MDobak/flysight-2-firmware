@@ -194,3 +194,27 @@ func TestIndexAndAudio(t *testing.T) {
 		t.Fatalf("zip: %s", got)
 	}
 }
+
+func TestApp(t *testing.T) {
+	s := testServer(t)
+	get := func(f http.HandlerFunc, url string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		f(w, httptest.NewRequest(http.MethodGet, url, nil))
+		return w
+	}
+	if w := get(s.index, "/"); strings.Contains(w.Body.String(), "flysight.apk") {
+		t.Fatal("index has the app download without an APK")
+	}
+	if w := get(s.app, "/flysight.apk"); w.Code != http.StatusNotFound {
+		t.Fatalf("no APK: %d", w.Code)
+	}
+	s.apk = bytes.Repeat([]byte("PK"), 1_500_000)
+	if w := get(s.index, "/"); !strings.Contains(w.Body.String(), "Download the app (3.0 MB)") {
+		t.Fatal("index has no app download")
+	}
+	w := get(s.app, "/flysight.apk")
+	if w.Code != http.StatusOK || w.Body.Len() != len(s.apk) ||
+		w.Header().Get("Content-Type") != "application/vnd.android.package-archive" {
+		t.Fatalf("APK: %d %q", w.Code, w.Header())
+	}
+}
