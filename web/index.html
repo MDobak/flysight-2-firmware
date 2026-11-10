@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlySight 2 firmware (fork)</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9; --card: #fff; --text: #1b1d21; --muted: #5d636e; --line: #dde1e7;
+    --accent: #0b5cd5; --on-accent: #fff; --error-bg: #fdecec; --error: #a3201b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111316; --card: #1b1e23; --text: #e6e8ec; --muted: #9aa1ad; --line: #2c3139;
+      --accent: #7fb0ff; --on-accent: #0b1a33; --error-bg: #3a1716; --error: #ffb4ab;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 40rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 .25rem; }
+  h2 { font-size: 1.15rem; margin: 0 0 .75rem; }
+  .lead { color: var(--muted); margin: 0 0 2rem; }
+  section {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1.25rem 1.25rem 1.4rem; margin-bottom: 1.25rem;
+  }
+  ol { margin: 0 0 1rem; padding-left: 1.4rem; }
+  li { margin: .3rem 0; }
+  li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+  code { font: .9em ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  form { display: grid; gap: .75rem; margin: 1rem 0 .5rem; }
+  label { font-weight: 600; font-size: .9rem; }
+  input[type=file], select {
+    font: inherit; color: inherit; width: 100%; padding: .55rem;
+    border: 1px solid var(--line); border-radius: 8px; background: transparent;
+  }
+  .button {
+    display: inline-block; justify-self: start; font: inherit; font-weight: 600;
+    padding: .6rem 1.2rem; border: 0; border-radius: 999px; cursor: pointer;
+    background: var(--accent); color: var(--on-accent); text-decoration: none;
+  }
+  .button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .error {
+    background: var(--error-bg); color: var(--error); border-radius: 8px;
+    padding: .75rem 1rem; margin: 0 0 1.25rem;
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>FlySight 2 firmware (fork)</h1>
+  <p class="lead">A custom firmware and new audio files for FlySight 2.{{if .Version}} Version <code>{{.Version}}</code>.{{end}}</p>
+
+  {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+
+  <section>
+    <h2>Firmware</h2>
+    <ol>
+      <li>Connect the FlySight to your computer with USB.</li>
+      <li>Push and hold the button until the FlySight resets and the light turns orange (about 10 seconds).</li>
+      <li>Upload the <code>FLYSIGHT.TXT</code> file from the FlySight. The website returns <code>APP.SFB</code> for the hardware batch of your FlySight.</li>
+      <li>If necessary, make a folder with the name <code>FW</code> on the FlySight.</li>
+      <li>Copy <code>APP.SFB</code> into the <code>FW</code> folder.</li>
+      <li>Eject the FlySight.</li>
+      <li>Disconnect the FlySight from the computer. Wait a few seconds while the FlySight resets and installs the firmware.</li>
+    </ol>
+    <form action="/firmware" method="post" enctype="multipart/form-data">
+      <label for="flysight_file">FLYSIGHT.TXT</label>
+      <input type="file" name="flysight_file" id="flysight_file" accept=".txt,.TXT,text/plain" required>
+      {{if gt (len .Firmwares) 1}}
+      <label for="firmware">Firmware</label>
+      <select name="firmware" id="firmware">
+        {{range .Firmwares}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+      </select>
+      {{end}}
+      <button class="button" type="submit">Get APP.SFB</button>
+    </form>
+    <p class="muted">With the FlySight app, you can also install <code>APP.SFB</code> over Bluetooth (Device &gt; Firmware).</p>
+  </section>
+
+  <section>
+    <h2>Audio files</h2>
+    <p>This firmware speaks words that the original audio files do not have. Install these audio files with the firmware.</p>
+    <ol>
+      <li>Download the ZIP file and extract it. It has one folder, <code>AUDIO</code>, with {{.AudioN}} sound files.</li>
+      <li>Copy the <code>AUDIO</code> folder onto the FlySight. Replace the old files.</li>
+    </ol>
+    <a class="button" href="/audio.zip" download>Download the audio files</a>
+  </section>
+
+  <section>
+    <h2>Original firmware and audio files</h2>
+    <p>The official firmware and the original audio files are on the
+      <a href="https://flysight.ca/firmware/">FlySight firmware page</a>. Use them to go back to the official firmware.</p>
+  </section>
+</main>
+</body>
+</html>
