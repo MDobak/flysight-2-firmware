@@ -35,5 +35,11 @@
             android:name=".TrackActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false" />
+        <!-- Read access to the exported KML files for Google Earth and the share target -->
+        <provider
+            android:name=".ExportProvider"
+            android:authorities="${applicationId}.export"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

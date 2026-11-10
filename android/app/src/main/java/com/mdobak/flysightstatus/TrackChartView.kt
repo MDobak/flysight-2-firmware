@@ -122,6 +122,17 @@ class TrackChartView(context: Context, private val ui: Ui) : View(context) {
         cursor = if (list.any { it.hasExit }) 0.0 else fullMin
     }
 
+    /** Move the cursor to [time] (s). If the cursor is not in the visible range, move the range. */
+    fun showCursor(time: Double) {
+        cursor = time
+        val span = xMax - xMin
+        if (time < xMin || time > xMax) {
+            xMin = (time - span * 0.1).coerceIn(fullMin, max(fullMin, fullMax - span))
+            xMax = xMin + span
+        }
+        invalidate()
+    }
+
     fun setVisible(series: Series, on: Boolean) {
         if (on) visible += series else visible -= series
         invalidate()

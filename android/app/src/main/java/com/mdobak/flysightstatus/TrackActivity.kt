@@ -1,6 +1,8 @@
 package com.mdobak.flysightstatus
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -29,13 +31,19 @@ class TrackActivity : Activity() {
     private lateinit var ui: Ui
     private lateinit var chart: TrackChartView
     private lateinit var map: TrackMapView
+    private lateinit var pane3d: Track3DPane
     private lateinit var split: SplitLayout
     private lateinit var bar: Ui.TopBar
     private lateinit var layoutGroup: Ui.IconToggleGroup
     private lateinit var progress: View
     private lateinit var controls: LinearLayout
     private lateinit var snackbars: Ui.SnackbarHost
+    private lateinit var playback: PlaybackBar
+    private lateinit var replayButton: android.widget.ImageView
     private var tracks: List<Track> = emptyList()
+    private var labels: List<String> = emptyList()
+    /** The chips of the chart lines. They are hidden when only the map shows. */
+    private var seriesRow: View? = null
     private var files: List<File> = emptyList()
 
     private val prefs by lazy { getSharedPreferences("track_viewer", Context.MODE_PRIVATE) }
@@ -60,7 +68,8 @@ class TrackActivity : Activity() {
                     setMargins(0, 0, ui.dp(8), ui.dp(24))
                 })
         }
-        split = SplitLayout(ui, chart, mapPane).apply {
+        val mapFrame = mapFrame(mapPane)
+        split = SplitLayout(ui, chart, mapFrame).apply {
             ratio = prefs.getFloat(PREF_RATIO, 0.5f)
             mode = SplitLayout.Mode.entries.getOrElse(prefs.getInt(PREF_MODE, 1)) { SplitLayout.Mode.BOTH }
             vertical = resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
@@ -75,10 +84,16 @@ class TrackActivity : Activity() {
         ), split.mode.ordinal) { setMode(SplitLayout.Mode.entries[it]) }
         updateSplitIcon()
         bar.addAction(layoutGroup)
-        bar.addAction(ui.iconButton(R.drawable.ic_info, "Jump details") { showDetails() })
+        replayButton = ui.iconButton(R.drawable.ic_play, "Replay") { toggleReplay() }
+        bar.addAction(replayButton)
+        // Secondary actions in an overflow menu: the top bar has little space
+        lateinit var more: View
+        more = ui.iconButton(R.drawable.ic_more, "More options") { showMore(more) }
+        bar.addAction(more)
 
         progress = ui.linearProgress().apply { isIndeterminate = true }
         controls = ui.column().apply { visibility = View.GONE }
+        playback = playbackBar()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -86,6 +101,7 @@ class TrackActivity : Activity() {
             addView(progress, LinearLayout.LayoutParams(MATCH, ui.dp(4)))
             addView(controls, LinearLayout.LayoutParams(MATCH, WRAP))
             addView(split, LinearLayout.LayoutParams(MATCH, 0, 1f))
+            addView(playback, LinearLayout.LayoutParams(MATCH, WRAP))
         }
         val frame = FrameLayout(this).apply { addView(root) }
         snackbars = ui.SnackbarHost(frame)
@@ -98,6 +114,128 @@ class TrackActivity : Activity() {
         }
         setContentView(frame)
         load()
+    }
+
+    /**
+     * The 2D map and the 3D view in one pane, with a switch in the top-right corner.
+     * The 3D view loads its tiles only when it is shown.
+     */
+    private fun mapFrame(mapPane: View): View {
+        pane3d = Track3DPane(this, ui).apply { visibility = View.GONE }
+        val previous = chart.onCursorChanged
+        chart.onCursorChanged = {
+            previous?.invoke(it)
+            pane3d.view.setCursor(it)
+        }
+        val is3d = prefs.getBoolean(PREF_3D, false)
+        val switch = ui.IconToggleGroup(listOf(
+            R.drawable.ic_view_2d to "2D map",
+            R.drawable.ic_view_3d to "3D view",
+        ), if (is3d) 1 else 0) { show3d(it == 1, mapPane) }.apply {
+            background = ui.shape(ui.surfaceContainerHigh, 18f)
+            elevation = ui.dpf(3f)
+        }
+        show3d(is3d, mapPane)
+        return FrameLayout(this).apply {
+            addView(mapPane, FrameLayout.LayoutParams(MATCH, MATCH))
+            addView(pane3d, FrameLayout.LayoutParams(MATCH, MATCH))
+            addView(switch, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.END).apply {
+                setMargins(0, ui.dp(8), ui.dp(8), 0)
+            })
+        }
+    }
+
+    /**
+     * The replay moves the cursor of the chart, the map and the 3D view. The 3D
+     * view follows the cursor during the replay, until the user unpins it. A
+     * drag on the chart pauses the replay.
+     */
+    private fun playbackBar(): PlaybackBar {
+        val player = PlaybackBar(this, ui)
+        player.onTime = {
+            chart.showCursor(it)
+            map.setCursor(it)
+            pane3d.view.setCursor(it)
+        }
+        player.onOpenChanged = { open ->
+            pane3d.setReplay(open)
+            replayButton.setImageResource(if (open) R.drawable.ic_stop else R.drawable.ic_play)
+            replayButton.contentDescription = if (open) "Stop the replay" else "Replay"
+            replayButton.tooltipText = replayButton.contentDescription
+        }
+        val previous = chart.onCursorChanged
+        chart.onCursorChanged = {
+            previous?.invoke(it)
+            player.showTime(it)
+        }
+        return player
+    }
+
+    /** Show the player bar and play, or stop and hide it. */
+    private fun toggleReplay() {
+        if (tracks.isEmpty()) return
+        if (playback.isOpen) playback.close() else playback.open()
+    }
+
+    private fun showMore(anchor: View) {
+        if (tracks.isEmpty()) return
+        ui.popupMenu(anchor, listOf(
+            "Jump details" to { showDetails() },
+            "Open in Google Earth" to { exportKml(googleEarth = true) },
+            "Share as KML file" to { exportKml(googleEarth = false) },
+        ))
+    }
+
+    /** Write the KML file, then open it in Google Earth or in the share sheet. */
+    private fun exportKml(googleEarth: Boolean) {
+        val title = bar.title.text.toString()
+        val list = tracks
+        val names = labels
+        Thread {
+            val result = runCatching { KmlExport.export(this, list, names, title) }
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                result.onSuccess { uri ->
+                    if (googleEarth) {
+                        val view = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, KmlExport.MIME)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            setPackage(GOOGLE_EARTH)
+                        }
+                        try {
+                            startActivity(view)
+                            return@runOnUiThread
+                        } catch (_: ActivityNotFoundException) {
+                            snackbars.show("Google Earth is not installed. Select a different app.")
+                        }
+                    }
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = KmlExport.MIME
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        clipData = ClipData.newRawUri(title, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(send, "Share the KML file"))
+                }.onFailure { snackbars.show("Cannot export the track: ${it.message}", long = true) }
+            }
+        }.start()
+    }
+
+    private fun show3d(on: Boolean, mapPane: View) {
+        mapPane.visibility = if (on) View.INVISIBLE else View.VISIBLE
+        pane3d.visibility = if (on) View.VISIBLE else View.GONE
+        prefs.edit().putBoolean(PREF_3D, on).apply()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        playback.stop()
+        pane3d.view.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        pane3d.view.onResume()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -116,6 +254,14 @@ class TrackActivity : Activity() {
         split.mode = mode
         if (layoutGroup.selected != mode.ordinal) layoutGroup.select(mode.ordinal)
         prefs.edit().putInt(PREF_MODE, mode.ordinal).apply()
+        updateControls()
+    }
+
+    /** The chart chips show only with the chart. The track chips also control the map. */
+    private fun updateControls() {
+        val row = seriesRow ?: return
+        row.visibility = if (split.mode == SplitLayout.Mode.SECOND) View.GONE else View.VISIBLE
+        controls.visibility = if ((0 until controls.childCount).any { controls.getChildAt(it).visibility == View.VISIBLE }) View.VISIBLE else View.GONE
     }
 
     private fun load() {
@@ -134,9 +280,11 @@ class TrackActivity : Activity() {
     private fun show(list: List<Track>) {
         tracks = list
         val sameDay = files.mapNotNull { TrackStore.dateOf(it) }.distinct().size <= 1
-        val labels = files.map { TrackStore.shortLabel(it, withDate = !sameDay) }
+        labels = files.map { TrackStore.shortLabel(it, withDate = !sameDay) }
         chart.setTracks(list, labels)
         map.setTracks(list)
+        pane3d.view.setTracks(list)
+        playback.setTracks(list)
         buildControls(labels)
         if (list.none { it.hasExit }) snackbars.show("No exit found. Time is from the first point.")
     }
@@ -151,7 +299,7 @@ class TrackActivity : Activity() {
             ui.Chip(s.label, LineSample(ui, color, dash), showCheck = false) { on -> chart.setVisible(s, on) }
                 .apply { checked = chart.isVisible(s) }
         }
-        controls.addView(ui.chipRow(*seriesChips.toTypedArray()))
+        seriesRow = ui.chipRow(*seriesChips.toTypedArray()).also { controls.addView(it) }
 
         if (multi) {
             val trackChips = labels.mapIndexed { i, label ->
@@ -164,11 +312,12 @@ class TrackActivity : Activity() {
                 ui.Chip(label, dot, showCheck = false) { on ->
                     chart.setTrackVisible(i, on)
                     map.setTrackVisible(i, on)
+                    pane3d.view.setTrackVisible(i, on)
                 }.apply { checked = true }
             }
             controls.addView(ui.chipRow(*trackChips.toTypedArray()))
         }
-        controls.visibility = View.VISIBLE
+        updateControls()
     }
 
     private fun showDetails() {
@@ -224,6 +373,8 @@ class TrackActivity : Activity() {
         private const val EXTRA_FILES = "files"
         private const val PREF_RATIO = "ratio"
         private const val PREF_MODE = "mode"
+        private const val PREF_3D = "map_3d"
+        private const val GOOGLE_EARTH = "com.google.earth"
 
         fun open(context: Context, files: List<File>) {
             context.startActivity(Intent(context, TrackActivity::class.java).putExtra(EXTRA_FILES, files.map { it.path }.toTypedArray()))
