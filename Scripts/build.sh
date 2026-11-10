@@ -22,13 +22,16 @@
 #   --forget-batch        Delete the remembered batch, then build.
 #   --out DIR             Output folder. The default is Release/ in the repository.
 #
+# Without git (for example in the Docker build of web/), set FLYSIGHT_VERSION.
+# The script then finds the source files with find.
+#
 # The remembered batch is in ~/.cache/flysight-2-firmware/batch.
 # APP.SFB needs Python 3 (PYTHON selects the version). The script makes a Python environment
 # in ~/.cache/flysight-2-firmware/venv the first time.
 
 set -euo pipefail
 
-usage() { sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 OUT=$REPO/Release
@@ -85,11 +88,18 @@ command -v arm-none-eabi-gcc >/dev/null || {
 
 cd "$REPO"
 
+HAVE_GIT=0
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 && HAVE_GIT=1
+if [ "$HAVE_GIT" = 0 ] && [ -z "${FLYSIGHT_VERSION:-}" ]; then
+  echo "No git repository. Set FLYSIGHT_VERSION to the firmware version." >&2
+  exit 1
+fi
+
 # Same as prebuild.sh: write the firmware version from git
-GIT_TAG=$(git describe --tags --always)
+GIT_TAG=${FLYSIGHT_VERSION:-$(git describe --tags --always)}
 printf '#ifndef VERSION_H\n#define VERSION_H\n\n#define GIT_TAG "%s"\n\n#endif // VERSION_H\n' \
   "$GIT_TAG" > FlySight/version.h
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+if [ "$HAVE_GIT" = 1 ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "Note: the working tree has uncommitted changes. The firmware version is $GIT_TAG." >&2
 fi
 
@@ -99,7 +109,7 @@ CFLAGS="$ARCH -std=gnu11 -Os -g0 -DUSE_HAL_DRIVER -DSTM32WB5Mxx \
 
 # Linker options from the "Release" configuration in .cproject
 LDEXTRA=""
-if awk '/name="Release"/,/<\/configuration>/' .cproject | grep -q 'nanoprintffloat[^>]*value="true"'; then
+if awk '/name="Release"/,/<\/configuration>/' .cproject | grep 'nanoprintffloat[^>]*value="true"' >/dev/null; then
   LDEXTRA="$LDEXTRA -u _printf_float"
 fi
 
@@ -120,9 +130,15 @@ for d in Core/Inc Drivers/BSP Drivers/STM32WBxx_HAL_Driver/Inc Drivers/STM32WBxx
 done
 
 # Same source folders as .cproject. Tracked and new (not ignored) files.
-SRCS=$(git ls-files -co --exclude-standard \
-  'USB_Device/*.c' 'STM32_WPAN/*.c' 'Core/*.c' 'FlySight/*.c' \
-  'Utilities/*.c' 'FATFS/*.c' 'Middlewares/*.c' 'Drivers/*.c')
+SRC_DIRS="USB_Device STM32_WPAN Core FlySight Utilities FATFS Middlewares Drivers"
+if [ "$HAVE_GIT" = 1 ]; then
+  PATHSPECS=()
+  for d in $SRC_DIRS; do PATHSPECS+=("$d/*.c"); done
+  SRCS=$(git ls-files -co --exclude-standard "${PATHSPECS[@]}")
+else
+  # shellcheck disable=SC2086
+  SRCS=$(find $SRC_DIRS -name '*.c' | LC_ALL=C sort)
+fi
 
 rm -rf "$OUT/obj"
 mkdir -p "$OUT/obj"
@@ -143,7 +159,7 @@ arm-none-eabi-gcc $ARCH -c -x assembler-with-cpp Core/Startup/startup_stm32wb5mm
 # shellcheck disable=SC2086
 arm-none-eabi-gcc $ARCH --specs=nano.specs --specs=nosys.specs $LDEXTRA -T STM32WB5MMGHX_FLASH.ld \
   -Wl,--gc-sections -Wl,-Map="$OUT/UserApp.map" -o "$OUT/UserApp.elf" \
-  $(find "$OUT/obj" -name '*.o') -lc -lm
+  $(find "$OUT/obj" -name '*.o' | LC_ALL=C sort) -lc -lm
 
 arm-none-eabi-objcopy -O binary "$OUT/UserApp.elf" "$OUT/UserApp.bin"
 arm-none-eabi-size "$OUT/UserApp.elf"
