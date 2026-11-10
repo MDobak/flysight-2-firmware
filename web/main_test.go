@@ -138,7 +138,7 @@ func testServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &server{keys: keys, firmwares: []firmware{{"", testFirmware()}}, audioZip: audio, audioN: n}
+	return &server{keys: keys, firmwares: []firmware{{"", testFirmware()}}, voices: []voice{{"voice1", "Voice 1", audio, n, []byte("s1")}}}
 }
 
 func upload(t *testing.T, s *server, text string) *httptest.ResponseRecorder {
@@ -192,6 +192,112 @@ func TestIndexAndAudio(t *testing.T) {
 	}
 	if got := strings.Join(names, " "); got != "AUDIO/ AUDIO/1.wav AUDIO/ALT.WAV" {
 		t.Fatalf("zip: %s", got)
+	}
+}
+
+func TestVoices(t *testing.T) {
+	s := testServer(t)
+	get := func(f http.HandlerFunc, url string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		f(w, httptest.NewRequest(http.MethodGet, url, nil))
+		return w
+	}
+	if w := get(s.index, "/"); strings.Contains(w.Body.String(), `name="voice"`) {
+		t.Fatal("index has a voice choice with one voice")
+	}
+	s.voices = append(s.voices, voice{"voice2", "Voice 2", []byte("v2"), 1, []byte("s2")})
+	body := get(s.index, "/").Body.String()
+	for _, want := range []string{
+		`<input type="radio" name="voice" value="voice1" checked> Voice 1`,
+		`<input type="radio" name="voice" value="voice2"> Voice 2`,
+		`data-sample="/sample.wav?voice=voice2"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index has no %s", want)
+		}
+	}
+	for url, want := range map[string]string{
+		"/audio.zip":              "voice1",
+		"/audio.zip?voice=voice1": "voice1",
+		"/audio.zip?voice=voice2": "voice2",
+	} {
+		w := get(s.audio, url)
+		if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Content-Disposition"), "flysight-2-audio-"+want+".zip") {
+			t.Errorf("%s: %d %q", url, w.Code, w.Header())
+		}
+	}
+	if w := get(s.audio, "/audio.zip?voice=x"); w.Code != http.StatusNotFound {
+		t.Errorf("unknown voice: %d", w.Code)
+	}
+	for url, want := range map[string]string{
+		"/sample.wav":              "s1",
+		"/sample.wav?voice=voice2": "s2",
+	} {
+		w := get(s.sample, url)
+		if w.Code != http.StatusOK || w.Body.String() != want || w.Header().Get("Content-Type") != "audio/wav" {
+			t.Errorf("%s: %d %q", url, w.Code, w.Body.String())
+		}
+	}
+	if w := get(s.sample, "/sample.wav?voice=x"); w.Code != http.StatusNotFound {
+		t.Errorf("unknown voice sample: %d", w.Code)
+	}
+}
+
+// testWAV is a plain WAV file with a 44-byte header: 24 kHz, mono, 16-bit.
+func testWAV(data []byte) []byte {
+	out := []byte("RIFF")
+	out = binary.LittleEndian.AppendUint32(out, uint32(36+len(data)))
+	out = append(out, "WAVEfmt "...)
+	out = binary.LittleEndian.AppendUint32(out, 16)
+	out = binary.LittleEndian.AppendUint16(out, 1)
+	out = binary.LittleEndian.AppendUint16(out, 1)
+	out = binary.LittleEndian.AppendUint32(out, 24000)
+	out = binary.LittleEndian.AppendUint32(out, 48000)
+	out = binary.LittleEndian.AppendUint16(out, 2)
+	out = binary.LittleEndian.AppendUint16(out, 16)
+	out = append(out, "data"...)
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(data)))
+	return append(out, data...)
+}
+
+func TestMakeSample(t *testing.T) {
+	dir := t.TempDir()
+	words := 0
+	for _, call := range sampleCalls {
+		for _, name := range call {
+			os.WriteFile(filepath.Join(dir, name+".WAV"), testWAV([]byte{1, 2}), 0o644)
+			words++
+		}
+	}
+	wav, err := makeSample(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gap := int(48000 * sampleGap.Seconds())
+	n := 2*words + gap*(len(sampleCalls)-1)
+	if want := testWAV(make([]byte, n)); len(wav) != len(want) || !bytes.Equal(wav[:44], want[:44]) {
+		t.Fatalf("got %d bytes, header % x; want %d bytes, header % x", len(wav), wav[:44], len(want), want[:44])
+	}
+	if !bytes.Equal(wav[44:48], []byte{1, 2, 1, 2}) {
+		t.Fatalf("data starts with % x", wav[44:48])
+	}
+
+	os.WriteFile(filepath.Join(dir, "ALT.WAV"), []byte("text"), 0o644)
+	if _, err := makeSample(dir); err == nil {
+		t.Fatal("no error for a file that is not a WAV file")
+	}
+	os.Remove(filepath.Join(dir, "ALT.WAV"))
+	if _, err := makeSample(dir); err == nil {
+		t.Fatal("no error for a missing file")
+	}
+}
+
+// TestSampleOfVoices makes the sample of each voice of the website.
+func TestSampleOfVoices(t *testing.T) {
+	for _, v := range []string{"voice1", "voice1-1.25", "voice2", "voice2-1.25", "voice3", "voice3-1.25"} {
+		if _, err := makeSample(filepath.Join("..", "Audio", v)); err != nil {
+			t.Error(err)
+		}
 	}
 }
 

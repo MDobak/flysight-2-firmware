@@ -5,7 +5,13 @@ A small website in Go, with no dependencies outside the standard library.
 - The user uploads `FLYSIGHT.TXT`. The server reads only the `Pubkey_X` line,
   finds the hardware batch in `Deploy/Public_Keys`, and returns `APP.SFB` for
   this batch. It does not keep the uploaded file. The log shows only the batch.
-- `/audio.zip` gives the WAV files of `Audio/voice1` in the folder `AUDIO`.
+- `/audio.zip` gives the WAV files of a voice in the folder `AUDIO`. With more
+  than one `-audio` flag, the page shows a voice choice, and
+  `/audio.zip?voice=ID` selects the voice. The ID is the name of the folder.
+- `/sample.wav?voice=ID` gives a sample of a voice: three calls of the
+  FlySight. The page has a button that plays the sample of each voice. Each
+  voice folder must have the sound files of the sample (`sampleCalls` in
+  `main.go`).
 - `/flysight.apk` gives the Android app (`android/`), if you start the server
   with `-apk`.
 - The page has a link to <https://flysight.ca/firmware/> for the official
@@ -32,7 +38,7 @@ Open <http://localhost:8080>.
 | `-addr` | `localhost:8080` | Listen address. Use `:8080` for all interfaces. |
 | `-firmware` | `../Release/UserApp.bin` | `PATH` or `NAME=PATH`. Use the flag more than once to show a firmware choice, for example `-firmware develop=a.bin -firmware simulation=b.bin`. |
 | `-keys` | `../Deploy/Public_Keys` | Folder with `pub_key_*.bin`. |
-| `-audio` | `../Audio/voice1` | Folder with the WAV files. |
+| `-audio` | `../Audio/voice1` | Folder with the WAV files of a voice, as `DIR` or `LABEL=DIR`. Use the flag more than once for more voices, for example `-audio "Voice 1=../Audio/voice1" -audio "Voice 2=../Audio/voice2"`. The first voice is the default. |
 | `-version` | (empty) | The version text on the page. |
 | `-apk` | (empty) | APK of the Android app. If it is empty, the page has no app download. |
 

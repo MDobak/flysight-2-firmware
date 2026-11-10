@@ -88,7 +88,14 @@ COPY --from=server /out/flysight-web /app/flysight-web
 COPY --from=firmware /out/UserApp.bin /app/UserApp.bin
 COPY --from=app /out/FlySight.apk /app/FlySight.apk
 COPY Deploy/Public_Keys/ /app/keys/
-COPY Audio/voice1/*.WAV /app/audio/
+# The WAV files of the voices (web/Dockerfile.dockerignore selects them).
+COPY Audio/ /app/audio/
 EXPOSE 8080
 ENTRYPOINT ["/app/flysight-web"]
-CMD ["-addr", ":8080", "-keys", "/app/keys", "-audio", "/app/audio", "-firmware", "/app/UserApp.bin", "-apk", "/app/FlySight.apk"]
+CMD ["-addr", ":8080", "-keys", "/app/keys", "-firmware", "/app/UserApp.bin", "-apk", "/app/FlySight.apk", \
+     "-audio", "Voice 1=/app/audio/voice1", \
+     "-audio", "Voice 1, 1.25× speed=/app/audio/voice1-1.25", \
+     "-audio", "Voice 2=/app/audio/voice2", \
+     "-audio", "Voice 2, 1.25× speed=/app/audio/voice2-1.25", \
+     "-audio", "Voice 3=/app/audio/voice3", \
+     "-audio", "Voice 3, 1.25× speed=/app/audio/voice3-1.25"]

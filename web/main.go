@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"embed"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -41,32 +43,43 @@ type firmware struct {
 	data []byte
 }
 
+// voice is a set of sound files. ID is the folder name, and the value of
+// ?voice= in /audio.zip and /sample.wav.
+type voice struct {
+	ID, Label string
+	zip       []byte
+	n         int
+	sample    []byte // a WAV file with some calls of the FlySight
+}
+
 type server struct {
 	keys      map[string]batchKey
 	firmwares []firmware
-	audioZip  []byte
-	audioN    int
+	voices    []voice
 	apk       []byte
 	version   string
 }
 
-// firmwareFlags is the -firmware flag. Each value is PATH or NAME=PATH.
-type firmwareFlags []string
+// listFlag is a flag that you can use more than once (-firmware, -audio).
+type listFlag []string
 
-func (f *firmwareFlags) String() string     { return strings.Join(*f, ",") }
-func (f *firmwareFlags) Set(v string) error { *f = append(*f, v); return nil }
+func (f *listFlag) String() string     { return strings.Join(*f, ",") }
+func (f *listFlag) Set(v string) error { *f = append(*f, v); return nil }
 
 func main() {
-	var fwFlags firmwareFlags
+	var fwFlags, audioFlags listFlag
 	addr := flag.String("addr", "localhost:8080", "listen address")
 	keysDir := flag.String("keys", "../Deploy/Public_Keys", "folder with pub_key_*.bin")
-	audioDir := flag.String("audio", "../Audio/voice1", "folder with the WAV files")
 	version := flag.String("version", buildVersion, "firmware version to show on the page")
 	apkFile := flag.String("apk", "", "APK of the Android app. Empty: the page has no app download")
 	flag.Var(&fwFlags, "firmware", "UserApp.bin as PATH or NAME=PATH. Use more than once for more firmware choices (default ../Release/UserApp.bin)")
+	flag.Var(&audioFlags, "audio", "folder with the WAV files of a voice, as DIR or LABEL=DIR. Use more than once for more voices. The first is the default (default ../Audio/voice1)")
 	flag.Parse()
 	if len(fwFlags) == 0 {
-		fwFlags = firmwareFlags{"../Release/UserApp.bin"}
+		fwFlags = listFlag{"../Release/UserApp.bin"}
+	}
+	if len(audioFlags) == 0 {
+		audioFlags = listFlag{"../Audio/voice1"}
 	}
 
 	s := &server{version: *version}
@@ -89,10 +102,27 @@ func main() {
 		s.firmwares = append(s.firmwares, firmware{name, data})
 		log.Printf("firmware %q: %s, %d bytes", name, file, len(data))
 	}
-	if s.audioZip, s.audioN, err = makeAudioZip(*audioDir); err != nil {
-		log.Fatal(err)
+	for _, v := range audioFlags {
+		label, dir, ok := strings.Cut(v, "=")
+		if !ok {
+			dir = v
+		}
+		id := filepath.Base(filepath.Clean(dir))
+		if !ok {
+			label = id
+		}
+		data, n, err := makeAudioZip(dir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		sample, err := makeSample(dir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		s.voices = append(s.voices, voice{id, label, data, n, sample})
+		log.Printf("voice %q (%s): %s, %d sound files", label, id, dir, n)
 	}
-	log.Printf("%d batches, %d sound files", len(s.keys), s.audioN)
+	log.Printf("%d batches", len(s.keys))
 	if *apkFile != "" {
 		if s.apk, err = os.ReadFile(*apkFile); err != nil {
 			log.Fatal(err)
@@ -104,6 +134,7 @@ func main() {
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("POST /firmware", s.firmware)
 	mux.HandleFunc("GET /audio.zip", s.audio)
+	mux.HandleFunc("GET /sample.wav", s.sample)
 	mux.HandleFunc("GET /flysight.apk", s.app)
 	log.Printf("listening on http://%s", *addr)
 	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
@@ -113,6 +144,7 @@ func main() {
 type pageData struct {
 	Version   string
 	Firmwares []firmware
+	Voices    []voice
 	AudioN    int
 	APKSize   string // empty if there is no APK
 	Error     string
@@ -125,7 +157,7 @@ func (s *server) render(w http.ResponseWriter, status int, msg string) {
 	if len(s.apk) > 0 {
 		apkSize = fmt.Sprintf("%.1f MB", float64(len(s.apk))/1e6)
 	}
-	if err := page.Execute(w, pageData{s.version, s.firmwares, s.audioN, apkSize, msg}); err != nil {
+	if err := page.Execute(w, pageData{s.version, s.firmwares, s.voices, s.voices[0].n, apkSize, msg}); err != nil {
 		log.Print(err)
 	}
 }
@@ -192,11 +224,43 @@ func (s *server) firmware(w http.ResponseWriter, r *http.Request) {
 	w.Write(sfb)
 }
 
-func (s *server) audio(w http.ResponseWriter, _ *http.Request) {
+// voice gives the voice of ?voice=ID, or the first voice if there is no ID.
+func (s *server) voice(r *http.Request) (voice, bool) {
+	id := r.URL.Query().Get("voice")
+	if id == "" {
+		return s.voices[0], true
+	}
+	i := slices.IndexFunc(s.voices, func(v voice) bool { return v.ID == id })
+	if i < 0 {
+		return voice{}, false
+	}
+	return s.voices[i], true
+}
+
+// audio gives the ZIP file of a voice.
+func (s *server) audio(w http.ResponseWriter, r *http.Request) {
+	v, ok := s.voice(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="flysight-2-audio.zip"`)
-	w.Header().Set("Content-Length", fmt.Sprint(len(s.audioZip)))
-	w.Write(s.audioZip)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="flysight-2-audio-%s.zip"`, v.ID))
+	w.Header().Set("Content-Length", fmt.Sprint(len(v.zip)))
+	w.Write(v.zip)
+}
+
+// sample gives the sample WAV file of a voice.
+func (s *server) sample(w http.ResponseWriter, r *http.Request) {
+	v, ok := s.voice(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "audio/wav")
+	w.Header().Set("Content-Length", fmt.Sprint(len(v.sample)))
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Write(v.sample)
 }
 
 func (s *server) app(w http.ResponseWriter, r *http.Request) {
@@ -252,4 +316,55 @@ func makeAudioZip(dir string) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	return buf.Bytes(), len(names), nil
+}
+
+// sampleCalls are the calls of the sample, as the names of the sound files:
+// "alti 2500", "H speed 55" and "glide 2.5".
+var sampleCalls = [][]string{
+	{"ALT", "2", "000", "5", "00"},
+	{"HSPEED", "50", "5"},
+	{"GLIDE", "2", "DOT", "5"},
+}
+
+// sampleGap is the silence between two calls of the sample.
+const sampleGap = 600 * time.Millisecond
+
+// makeSample joins the sound files of sampleCalls into one WAV file. The sound
+// files must be plain WAV files with a 44-byte header (the format of the
+// FlySight), all with the same format.
+func makeSample(dir string) ([]byte, error) {
+	var format, data []byte
+	for i, call := range sampleCalls {
+		for _, name := range call {
+			file := filepath.Join(dir, name+".WAV")
+			wav, err := os.ReadFile(file)
+			if err != nil {
+				return nil, err
+			}
+			if len(wav) < 44 || string(wav[0:4]) != "RIFF" || string(wav[8:16]) != "WAVEfmt " || string(wav[36:40]) != "data" {
+				return nil, fmt.Errorf("%s: not a WAV file with a 44-byte header", file)
+			}
+			if format == nil {
+				format = wav[20:36]
+			} else if !bytes.Equal(format, wav[20:36]) {
+				return nil, fmt.Errorf("%s: the format is not the same as in the other files", file)
+			}
+			data = append(data, wav[44:]...)
+		}
+		if i < len(sampleCalls)-1 {
+			bytesPerSecond := binary.LittleEndian.Uint32(format[8:12])
+			blockAlign := int(binary.LittleEndian.Uint16(format[12:14]))
+			n := int(float64(bytesPerSecond)*sampleGap.Seconds()) / blockAlign * blockAlign
+			data = append(data, make([]byte, n)...)
+		}
+	}
+	out := make([]byte, 0, 44+len(data))
+	out = append(out, "RIFF"...)
+	out = binary.LittleEndian.AppendUint32(out, uint32(36+len(data)))
+	out = append(out, "WAVEfmt "...)
+	out = binary.LittleEndian.AppendUint32(out, 16)
+	out = append(out, format...)
+	out = append(out, "data"...)
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(data)))
+	return append(out, data...), nil
 }

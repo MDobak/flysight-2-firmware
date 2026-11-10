@@ -13,7 +13,8 @@
 !Utilities/
 !Scripts/build.sh
 !Deploy/Public_Keys/
-!Audio/voice1/*.WAV
+!Audio/*/*.WAV
+Audio/original/*.WAV
 !web/go.mod
 !web/*.go
 !web/index.html

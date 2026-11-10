@@ -53,6 +53,22 @@
     padding: .75rem 1rem; margin: 0 0 1.25rem;
   }
   a { color: var(--accent); }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  legend { font-weight: 600; font-size: .9rem; padding: 0; margin-bottom: .4rem; }
+  .voices { display: grid; gap: .4rem; }
+  .voice {
+    display: flex; align-items: center; gap: .75rem;
+    border: 1px solid var(--line); border-radius: 8px; padding: .35rem .35rem .35rem .75rem;
+  }
+  .voice:has(input:checked) { border-color: var(--accent); }
+  .voice label { flex: 1; display: flex; align-items: center; gap: .6rem; font-weight: 400; font-size: 1rem; cursor: pointer; }
+  .voice input { accent-color: var(--accent); margin: 0; }
+  .play {
+    font: inherit; font-size: .9rem; color: var(--accent); background: transparent; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 999px; padding: .3rem .8rem; min-width: 5.5rem;
+  }
+  .play:focus-visible, .voice input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .play[aria-pressed=true] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -91,10 +107,28 @@
     <h2>Audio files</h2>
     <p>This firmware speaks words that the original audio files do not have. Install these audio files with the firmware.</p>
     <ol>
-      <li>Download the ZIP file and extract it. It has one folder, <code>AUDIO</code>, with {{.AudioN}} sound files.</li>
+      <li>{{if gt (len .Voices) 1}}Select a voice, then download{{else}}Download{{end}} the ZIP file and extract it. It has one folder, <code>AUDIO</code>, with {{.AudioN}} sound files.</li>
       <li>Copy the <code>AUDIO</code> folder onto the FlySight. Replace the old files.</li>
     </ol>
-    <a class="button" href="/audio.zip" download>Download the audio files</a>
+    <form action="/audio.zip" method="get">
+      {{if gt (len .Voices) 1}}
+      <fieldset>
+        <legend>Voice</legend>
+        <div class="voices">
+          {{range $i, $v := .Voices}}
+          <div class="voice">
+            <label><input type="radio" name="voice" value="{{$v.ID}}"{{if eq $i 0}} checked{{end}}> {{$v.Label}}</label>
+            <button class="play" type="button" data-sample="/sample.wav?voice={{$v.ID}}" aria-pressed="false" aria-label="Play a sample: {{$v.Label}}" hidden>Play</button>
+          </div>
+          {{end}}
+        </div>
+      </fieldset>
+      {{else}}
+      <p><button class="play" type="button" data-sample="/sample.wav" aria-pressed="false" aria-label="Play a sample" hidden>Play</button></p>
+      {{end}}
+      <button class="button" type="submit">Download the audio files</button>
+    </form>
+    <p class="muted">The sample has three calls: altitude 2500, horizontal speed 55 and glide ratio 2.5.</p>
   </section>
 
   {{if .APKSize}}
@@ -117,5 +151,30 @@
       <a href="https://flysight.ca/firmware/">FlySight firmware page</a>. Use them to go back to the official firmware.</p>
   </section>
 </main>
+<script>
+  // The sample buttons. One sample plays at a time. A second push stops it.
+  const player = new Audio();
+  let playing = null;
+  function stop() {
+    player.pause();
+    if (playing) { playing.textContent = "Play"; playing.setAttribute("aria-pressed", "false"); }
+    playing = null;
+  }
+  player.addEventListener("ended", stop);
+  player.addEventListener("error", stop);
+  for (const b of document.querySelectorAll(".play")) {
+    b.hidden = false;
+    b.addEventListener("click", () => {
+      const again = playing === b;
+      stop();
+      if (again) return;
+      player.src = b.dataset.sample;
+      player.play().catch(stop);
+      playing = b;
+      b.textContent = "Stop";
+      b.setAttribute("aria-pressed", "true");
+    });
+  }
+</script>
 </body>
 </html>
