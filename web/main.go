@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -57,6 +58,7 @@ type server struct {
 	firmwares []firmware
 	voices    []voice
 	apk       []byte
+	jumpZip   []byte // the sample jump, or nil
 	version   string
 }
 
@@ -72,6 +74,7 @@ func main() {
 	keysDir := flag.String("keys", "../Deploy/Public_Keys", "folder with pub_key_*.bin")
 	version := flag.String("version", buildVersion, "firmware version to show on the page")
 	apkFile := flag.String("apk", "", "APK of the Android app. Empty: the page has no app download")
+	jumpDir := flag.String("jump", "../Samples/wingsuit", "folder with a sample jump (log folders of the FlySight). Empty: the page has no sample jump")
 	flag.Var(&fwFlags, "firmware", "UserApp.bin as PATH or NAME=PATH. Use more than once for more firmware choices (default ../Release/UserApp.bin)")
 	flag.Var(&audioFlags, "audio", "folder with the WAV files of a voice, as DIR or LABEL=DIR. Use more than once for more voices. The first is the default (default ../Audio/voice1)")
 	flag.Parse()
@@ -130,12 +133,20 @@ func main() {
 		log.Printf("app: %s, %d bytes", *apkFile, len(s.apk))
 	}
 
+	if *jumpDir != "" {
+		if s.jumpZip, err = makeTreeZip(*jumpDir); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("sample jump: %s, %d bytes", *jumpDir, len(s.jumpZip))
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("POST /firmware", s.firmware)
 	mux.HandleFunc("GET /audio.zip", s.audio)
 	mux.HandleFunc("GET /sample.wav", s.sample)
 	mux.HandleFunc("GET /flysight.apk", s.app)
+	mux.HandleFunc("GET /sample-jump.zip", s.jump)
 	log.Printf("listening on http://%s", *addr)
 	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.ListenAndServe())
@@ -147,17 +158,22 @@ type pageData struct {
 	Voices    []voice
 	AudioN    int
 	APKSize   string // empty if there is no APK
+	JumpSize  string // empty if there is no sample jump
 	Error     string
 }
 
 func (s *server) render(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	apkSize := ""
+	apkSize, jumpSize := "", ""
 	if len(s.apk) > 0 {
 		apkSize = fmt.Sprintf("%.1f MB", float64(len(s.apk))/1e6)
 	}
-	if err := page.Execute(w, pageData{s.version, s.firmwares, s.voices, s.voices[0].n, apkSize, msg}); err != nil {
+	if len(s.jumpZip) > 0 {
+		jumpSize = fmt.Sprintf("%d KB", (len(s.jumpZip)+999)/1000)
+	}
+	data := pageData{s.version, s.firmwares, s.voices, s.voices[0].n, apkSize, jumpSize, msg}
+	if err := page.Execute(w, data); err != nil {
 		log.Print(err)
 	}
 }
@@ -272,6 +288,68 @@ func (s *server) app(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="FlySight.apk"`)
 	w.Header().Set("Content-Length", fmt.Sprint(len(s.apk)))
 	w.Write(s.apk)
+}
+
+func (s *server) jump(w http.ResponseWriter, r *http.Request) {
+	if len(s.jumpZip) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="flysight-2-sample-jump.zip"`)
+	w.Header().Set("Content-Length", fmt.Sprint(len(s.jumpZip)))
+	w.Write(s.jumpZip)
+}
+
+// makeTreeZip puts all files of dir and its subfolders into a ZIP file, with
+// their paths from dir.
+func makeTreeZip(dir string) ([]byte, error) {
+	var buf bytes.Buffer
+	z := zip.NewWriter(&buf)
+	n := 0
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil || rel == "." {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), ".") { // for example .DS_Store
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		f, err := z.CreateHeader(&zip.FileHeader{Name: filepath.ToSlash(rel), Method: zip.Deflate, Modified: info.ModTime()})
+		if err != nil {
+			return err
+		}
+		n++
+		_, err = f.Write(data)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, fmt.Errorf("no files in %s", dir)
+	}
+	if err := z.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // makeAudioZip puts the WAV files of dir into the folder AUDIO of a ZIP file.

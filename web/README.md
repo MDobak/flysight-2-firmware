@@ -12,6 +12,8 @@ A small website in Go, with no dependencies outside the standard library.
   FlySight. The page has a button that plays the sample of each voice. Each
   voice folder must have the sound files of the sample (`sampleCalls` in
   `main.go`).
+- `/sample-jump.zip` gives a sample jump: the files in the folder of `-jump`,
+  with their folders (for example `24-10-11/18-33-52/TRACK.CSV`).
 - `/flysight.apk` gives the Android app (`android/`), if you start the server
   with `-apk`.
 - The page has a link to <https://flysight.ca/firmware/> for the official
@@ -41,6 +43,7 @@ Open <http://localhost:8080>.
 | `-audio` | `../Audio/voice1` | Folder with the WAV files of a voice, as `DIR` or `LABEL=DIR`. Use the flag more than once for more voices, for example `-audio "Voice 1=../Audio/voice1" -audio "Voice 2=../Audio/voice2"`. The first voice is the default. |
 | `-version` | (empty) | The version text on the page. |
 | `-apk` | (empty) | APK of the Android app. If it is empty, the page has no app download. |
+| `-jump` | `../Samples/wingsuit` | Folder with a sample jump, as log folders of the FlySight. If it is empty, the page has no sample jump. |
 
 The server reads all files at the start. Start it again after a new build.
 

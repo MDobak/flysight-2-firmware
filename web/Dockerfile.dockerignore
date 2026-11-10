@@ -15,6 +15,7 @@
 !Deploy/Public_Keys/
 !Audio/*/*.WAV
 Audio/original/*.WAV
+!Samples/
 !web/go.mod
 !web/*.go
 !web/index.html

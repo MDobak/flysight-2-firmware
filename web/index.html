@@ -74,7 +74,8 @@
 <body>
 <main>
   <h1>FlySight 2 firmware (fork)</h1>
-  <p class="lead">A custom firmware and new audio files for FlySight 2.{{if .Version}} Version <code>{{.Version}}</code>.{{end}}</p>
+  <p class="lead">A custom firmware and new audio files for FlySight 2.{{if .Version}} Version <code>{{.Version}}</code>.{{end}}
+    The source code is on <a href="https://github.com/MDobak/flysight-2-firmware">GitHub</a>.</p>
 
   {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
 
@@ -130,6 +131,15 @@
     </form>
     <p class="muted">The sample has three calls: altitude 2500, horizontal speed 55 and glide ratio 2.5.</p>
   </section>
+
+  {{if .JumpSize}}
+  <section>
+    <h2>Sample jump</h2>
+    <a class="button" href="/sample-jump.zip" download>Download the sample jump ({{.JumpSize}})</a>
+    <p class="muted">Source: <a href="https://github.com/HozakaN/FlySight-Companion">FlySight Companion</a> (Apache-2.0).
+      The ZIP file has the source and the license.</p>
+  </section>
+  {{end}}
 
   {{if .APKSize}}
   <section>

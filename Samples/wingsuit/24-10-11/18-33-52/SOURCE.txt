@@ -1,0 +1,6 @@
+Wingsuit jump from an airplane, Beaufort NC, 2024-10-11. Exit at 18:33:57.6 UTC.
+Source: https://github.com/HozakaN/FlySight-Companion (release/2.0.0),
+  Feature/RecordsModule/src/main/resources/RECORD_beaufort_jump_9_2_temps.CSV
+License: Apache-2.0, the license of the source repository (see LICENSE.txt).
+Change: the rows before 18:33:52.6 are removed, so the track starts 5 s before exit.
+There is no SENSOR.CSV in the source, so a replay uses only the GNSS data.

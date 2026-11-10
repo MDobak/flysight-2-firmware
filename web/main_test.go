@@ -11,6 +11,7 @@ import (
 	"crypto/sha512"
 	"encoding/binary"
 	"encoding/hex"
+	"io"
 	"math/big"
 	"mime/multipart"
 	"net/http"
@@ -322,5 +323,63 @@ func TestApp(t *testing.T) {
 	if w.Code != http.StatusOK || w.Body.Len() != len(s.apk) ||
 		w.Header().Get("Content-Type") != "application/vnd.android.package-archive" {
 		t.Fatalf("APK: %d %q", w.Code, w.Header())
+	}
+}
+
+func TestSampleJump(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"24-10-11/18-33-52/TRACK.CSV", "24-10-11/18-33-52/SOURCE.txt", ".DS_Store", "24-10-11/.DS_Store"} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(f), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := makeTreeZip(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil || len(z.File) != 2 {
+		t.Fatalf("zip: %v", err)
+	}
+	for _, f := range z.File {
+		r, _ := f.Open()
+		b, _ := io.ReadAll(r)
+		if string(b) != f.Name {
+			t.Fatalf("%s has %q", f.Name, b)
+		}
+	}
+	if _, err := makeTreeZip(t.TempDir()); err == nil {
+		t.Fatal("no error for an empty folder")
+	}
+
+	s := testServer(t)
+	get := func(f http.HandlerFunc, url string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		f(w, httptest.NewRequest(http.MethodGet, url, nil))
+		return w
+	}
+	if w := get(s.index, "/"); strings.Contains(w.Body.String(), "sample-jump.zip") {
+		t.Fatal("index has the sample jump without a jump")
+	}
+	if w := get(s.jump, "/sample-jump.zip"); w.Code != http.StatusNotFound {
+		t.Fatalf("no jump: %d", w.Code)
+	}
+	s.jumpZip = data
+	if w := get(s.index, "/"); !strings.Contains(w.Body.String(), "Download the sample jump (") {
+		t.Fatal("index has no sample jump")
+	}
+	w := get(s.jump, "/sample-jump.zip")
+	if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), data) || w.Header().Get("Content-Type") != "application/zip" {
+		t.Fatalf("jump: %d %q", w.Code, w.Header())
+	}
+}
+
+func TestSampleJumpOfRepository(t *testing.T) {
+	data, err := makeTreeZip("../Samples/wingsuit")
+	if err != nil || len(data) == 0 {
+		t.Fatal(err)
 	}
 }

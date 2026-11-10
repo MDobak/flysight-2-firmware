@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # The website with all its files: the firmware, the public keys of the
-# hardware batches, the sound files, and the Android app. The image needs no
+# hardware batches, the sound files, the sample jump, and the Android app. The image needs no
 # other files.
 #
 # Build from the root of the repository. The secret is the key that signs the
@@ -90,9 +90,12 @@ COPY --from=app /out/FlySight.apk /app/FlySight.apk
 COPY Deploy/Public_Keys/ /app/keys/
 # The WAV files of the voices (web/Dockerfile.dockerignore selects them).
 COPY Audio/ /app/audio/
+# The sample jump: log folders of the FlySight.
+COPY Samples/ /app/samples/
 EXPOSE 8080
 ENTRYPOINT ["/app/flysight-web"]
 CMD ["-addr", ":8080", "-keys", "/app/keys", "-firmware", "/app/UserApp.bin", "-apk", "/app/FlySight.apk", \
+     "-jump", "/app/samples/wingsuit", \
      "-audio", "Voice 1=/app/audio/voice1", \
      "-audio", "Voice 1, 1.25× speed=/app/audio/voice1-1.25", \
      "-audio", "Voice 2=/app/audio/voice2", \

@@ -26,8 +26,9 @@ This fork adds features for the companion Android app (`android/`). Most fork co
 | `Audio/voice2/`, `Audio/voice2-1.25/` | New sound files, at 1.0 and 1.25 speed: the TTS model Fish Audio Drama 3, with the voice of a male reader of LibriTTS-R (speaker 2078). |
 | `Audio/voice3/`, `Audio/voice3-1.25/` | New sound files, at 1.0 and 1.25 speed: the macOS voice Samantha. |
 | `Audio/words.tsv` | The words of the new sound files. |
+| `Samples/wingsuit/` | A sample wingsuit jump from an airplane, as a log folder of the FlySight. `SOURCE.txt` gives the source and the license. |
 | `Scripts/build.sh`, `Scripts/make_sfb.py` | Build without STM32CubeIDE, and make `APP.SFB`. |
-| `web/` | A website in Go: it makes `APP.SFB` from `FLYSIGHT.TXT`, and gives the new sound files as a ZIP file and the Android app. `web/Dockerfile` makes an image with all files of the website. See `web/README.md`. |
+| `web/` | A website in Go: it makes `APP.SFB` from `FLYSIGHT.TXT`, and gives the new sound files and the sample jump as ZIP files, and the Android app. `web/Dockerfile` makes an image with all files of the website. See `web/README.md`. |
 | `.github/workflows/web-image.yml` | GitHub Actions: builds the website image and pushes it to `ghcr.io`. |
 
 ## Hooks in upstream files
