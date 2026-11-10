@@ -140,6 +140,12 @@ func main() {
 		log.Printf("sample jump: %s, %d bytes", *jumpDir, len(s.jumpZip))
 	}
 
+	log.Printf("listening on http://%s", *addr)
+	srv := &http.Server{Addr: *addr, Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second}
+	log.Fatal(srv.ListenAndServe())
+}
+
+func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("POST /firmware", s.firmware)
@@ -147,9 +153,8 @@ func main() {
 	mux.HandleFunc("GET /sample.wav", s.sample)
 	mux.HandleFunc("GET /flysight.apk", s.app)
 	mux.HandleFunc("GET /sample-jump.zip", s.jump)
-	log.Printf("listening on http://%s", *addr)
-	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	log.Fatal(srv.ListenAndServe())
+	mux.HandleFunc("/", notFound) // all other paths and methods
+	return mux
 }
 
 type pageData struct {
@@ -253,11 +258,16 @@ func (s *server) voice(r *http.Request) (voice, bool) {
 	return s.voices[i], true
 }
 
+// notFound sends the browser to the home page. The website has no 404 page.
+func notFound(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
 // audio gives the ZIP file of a voice.
 func (s *server) audio(w http.ResponseWriter, r *http.Request) {
 	v, ok := s.voice(r)
 	if !ok {
-		http.NotFound(w, r)
+		notFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "application/zip")
@@ -270,7 +280,7 @@ func (s *server) audio(w http.ResponseWriter, r *http.Request) {
 func (s *server) sample(w http.ResponseWriter, r *http.Request) {
 	v, ok := s.voice(r)
 	if !ok {
-		http.NotFound(w, r)
+		notFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "audio/wav")
@@ -281,7 +291,7 @@ func (s *server) sample(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) app(w http.ResponseWriter, r *http.Request) {
 	if len(s.apk) == 0 {
-		http.NotFound(w, r)
+		notFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
@@ -292,7 +302,7 @@ func (s *server) app(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) jump(w http.ResponseWriter, r *http.Request) {
 	if len(s.jumpZip) == 0 {
-		http.NotFound(w, r)
+		notFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "application/zip")

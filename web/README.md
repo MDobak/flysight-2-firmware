@@ -16,6 +16,7 @@ A small website in Go, with no dependencies outside the standard library.
   with their folders (for example `24-10-11/18-33-52/TRACK.CSV`).
 - `/flysight.apk` gives the Android app (`android/`), if you start the server
   with `-apk`.
+- All other paths, and missing files, redirect to the home page (302).
 - The page has a link to <https://flysight.ca/firmware/> for the official
   firmware and the original audio files.
 

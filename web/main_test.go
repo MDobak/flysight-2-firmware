@@ -227,7 +227,7 @@ func TestVoices(t *testing.T) {
 			t.Errorf("%s: %d %q", url, w.Code, w.Header())
 		}
 	}
-	if w := get(s.audio, "/audio.zip?voice=x"); w.Code != http.StatusNotFound {
+	if w := get(s.audio, "/audio.zip?voice=x"); w.Code != http.StatusFound {
 		t.Errorf("unknown voice: %d", w.Code)
 	}
 	for url, want := range map[string]string{
@@ -239,7 +239,7 @@ func TestVoices(t *testing.T) {
 			t.Errorf("%s: %d %q", url, w.Code, w.Body.String())
 		}
 	}
-	if w := get(s.sample, "/sample.wav?voice=x"); w.Code != http.StatusNotFound {
+	if w := get(s.sample, "/sample.wav?voice=x"); w.Code != http.StatusFound {
 		t.Errorf("unknown voice sample: %d", w.Code)
 	}
 }
@@ -312,7 +312,7 @@ func TestApp(t *testing.T) {
 	if w := get(s.index, "/"); strings.Contains(w.Body.String(), "flysight.apk") {
 		t.Fatal("index has the app download without an APK")
 	}
-	if w := get(s.app, "/flysight.apk"); w.Code != http.StatusNotFound {
+	if w := get(s.app, "/flysight.apk"); w.Code != http.StatusFound {
 		t.Fatalf("no APK: %d", w.Code)
 	}
 	s.apk = bytes.Repeat([]byte("PK"), 1_500_000)
@@ -364,7 +364,7 @@ func TestSampleJump(t *testing.T) {
 	if w := get(s.index, "/"); strings.Contains(w.Body.String(), "sample-jump.zip") {
 		t.Fatal("index has the sample jump without a jump")
 	}
-	if w := get(s.jump, "/sample-jump.zip"); w.Code != http.StatusNotFound {
+	if w := get(s.jump, "/sample-jump.zip"); w.Code != http.StatusFound {
 		t.Fatalf("no jump: %d", w.Code)
 	}
 	s.jumpZip = data
@@ -381,5 +381,24 @@ func TestSampleJumpOfRepository(t *testing.T) {
 	data, err := makeTreeZip("../Samples/wingsuit")
 	if err != nil || len(data) == 0 {
 		t.Fatal(err)
+	}
+}
+
+func TestNotFoundRedirect(t *testing.T) {
+	h := testServer(t).routes()
+	for _, c := range []struct{ method, url string }{
+		{"GET", "/x"}, {"GET", "/index.html"}, {"GET", "/audio.zip/x"}, {"GET", "/firmware"},
+		{"POST", "/x"}, {"GET", "/audio.zip?voice=x"}, {"GET", "/flysight.apk"}, {"GET", "/sample-jump.zip"},
+	} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(c.method, c.url, nil))
+		if w.Code != http.StatusFound || w.Header().Get("Location") != "/" {
+			t.Fatalf("%s %s: %d %q", c.method, c.url, w.Code, w.Header().Get("Location"))
+		}
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("home page: %d", w.Code)
 	}
 }
