@@ -372,13 +372,7 @@ class Ui(val context: Context) {
     }
 
     /** Segmented button with one selection. */
-    /** Segmented buttons. [compact] is 32 dp high, with a smaller label and no check icon. */
-    inner class Segmented(
-        labels: List<String>,
-        selected: Int,
-        private val compact: Boolean = false,
-        private val onSelect: (Int) -> Unit,
-    ) : LinearLayout(context) {
+    inner class Segmented(labels: List<String>, selected: Int, private val onSelect: (Int) -> Unit) : LinearLayout(context) {
         private val items = mutableListOf<LinearLayout>()
         private val texts = mutableListOf<TextView>()
         private val checks = mutableListOf<ImageView>()
@@ -391,7 +385,7 @@ class Ui(val context: Context) {
                 // The check icon and the label are centred together, as in M3.
                 val check = ImageView(context).apply { setImageResource(R.drawable.ic_check) }
                 val text = TextView(context).apply {
-                    style(this, if (compact) Type.LABEL_MEDIUM else Type.LABEL_LARGE)
+                    style(this, Type.LABEL_LARGE)
                     this.text = label
                     isSingleLine = true
                     ellipsize = android.text.TextUtils.TruncateAt.END
@@ -399,9 +393,9 @@ class Ui(val context: Context) {
                 val item = LinearLayout(context).apply {
                     orientation = HORIZONTAL
                     gravity = Gravity.CENTER
-                    minimumHeight = dp(if (compact) 32 else 48)
-                    setPadding(dp(if (compact) 8 else 12), 0, dp(if (compact) 8 else 12), 0)
-                    if (!compact) addView(check, LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(8) })
+                    minimumHeight = dp(48)
+                    setPadding(dp(12), 0, dp(12), 0)
+                    addView(check, LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(8) })
                     addView(text, LayoutParams(WRAP, WRAP).apply { weight = 0f })
                     setOnClickListener { select(i, notify = true) }
                     contentDescription = label
@@ -409,14 +403,14 @@ class Ui(val context: Context) {
                 items += item
                 texts += text
                 checks += check
-                addView(item, LayoutParams(0, dp(if (compact) 32 else 48), 1f).apply { if (i > 0) marginStart = -dp(1) })
+                addView(item, LayoutParams(0, dp(48), 1f).apply { if (i > 0) marginStart = -dp(1) })
             }
             select(selected, notify = false)
         }
 
         fun select(index: Int, notify: Boolean = false) {
             selected = index
-            val r = dpf(if (compact) 16f else 20f)
+            val r = dpf(20f)
             for ((i, item) in items.withIndex()) {
                 val on = i == index
                 val left = if (i == 0) r else 0f
@@ -427,11 +421,10 @@ class Ui(val context: Context) {
                     cornerRadii = floatArrayOf(left, left, right, right, right, right, left, left)
                 }
                 val fg = if (on) onSecondaryContainer else onSurface
-                val inset = if (compact) 0 else dp(4)
-                item.background = InsetDrawable(RippleDrawable(ColorStateList.valueOf(alpha(fg, 0.12f)), bg, bg), 0, inset, 0, inset)
+                item.background = InsetDrawable(RippleDrawable(ColorStateList.valueOf(alpha(fg, 0.12f)), bg, bg), 0, dp(4), 0, dp(4))
                 texts[i].setTextColor(fg)
                 checks[i].imageTintList = ColorStateList.valueOf(fg)
-                checks[i].visibility = if (on && !compact) VISIBLE else GONE
+                checks[i].visibility = if (on) VISIBLE else GONE
                 item.isSelected = on
             }
             if (notify) onSelect(index)

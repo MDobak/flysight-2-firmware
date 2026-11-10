@@ -17,7 +17,7 @@ import kotlin.math.roundToInt
  * It does not send data to the FlySight. The bar shows only during a replay:
  * [open] shows it and starts the replay, [close] stops the replay and hides it.
  */
-@SuppressLint("ViewConstructor")
+@SuppressLint("ViewConstructor", "ClickableViewAccessibility")
 class PlaybackBar(context: Context, private val ui: Ui) : LinearLayout(context) {
 
     /** Called with the time (s) at each frame of the replay and when the user moves the slider. */
@@ -38,6 +38,9 @@ class PlaybackBar(context: Context, private val ui: Ui) : LinearLayout(context) 
     var playing = false
         private set
 
+    /** Stops the replay on the FlySight, or null if the bar shows the replay in the app. */
+    private var remoteStop: (() -> Unit)? = null
+    private var remoteStatus: String? = null
     private var start = 0.0
     private var end = 1.0
     private var speed = 1.0
@@ -93,6 +96,8 @@ class PlaybackBar(context: Context, private val ui: Ui) : LinearLayout(context) 
         addView(timeText, LayoutParams(WRAP, WRAP))
         addView(slider, LayoutParams(0, WRAP, 1f))
         addView(speedButton, LayoutParams(WRAP, WRAP))
+        // During the FlySight replay, the slider only shows the position
+        slider.setOnTouchListener { _, _ -> remoteStop != null }
         slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser) setTime(start + (end - start) * progress / seekBar.max, notify = true, moveSlider = false)
@@ -136,6 +141,50 @@ class PlaybackBar(context: Context, private val ui: Ui) : LinearLayout(context) 
         onOpenChanged?.invoke(false)
     }
 
+    /**
+     * Show the replay on the FlySight. The slider shows the position, but the
+     * user cannot move it: the FlySight cannot go to a different position.
+     * The button stops the replay with [onStop].
+     */
+    fun openRemote(onStop: () -> Unit) {
+        stop()
+        remoteStop = onStop
+        speedButton.visibility = GONE
+        play.setImageResource(R.drawable.ic_stop)
+        play.contentDescription = "Stop the FlySight replay"
+        play.tooltipText = play.contentDescription
+        if (!isOpen) {
+            visibility = VISIBLE
+            onOpenChanged?.invoke(true)
+        }
+    }
+
+    /** The FlySight replay stopped: hide the bar. */
+    fun closeRemote() {
+        if (remoteStop == null) return
+        remoteStop = null
+        speedButton.visibility = VISIBLE
+        remoteStatus = null
+        updatePlayButton()
+        visibility = GONE
+        onOpenChanged?.invoke(false)
+    }
+
+    /** The bar shows the replay on the FlySight. */
+    val remote get() = remoteStop != null
+
+    /** The position of the FlySight replay (s). */
+    fun showRemoteTime(t: Double) {
+        setTime(t, notify = false)
+        remoteStatus?.let { timeText.text = it }
+    }
+
+    /** A status of the FlySight replay instead of the time, or null to show the time. */
+    fun showRemoteStatus(text: String?) {
+        remoteStatus = text
+        if (text != null) timeText.text = text else setTime(time, notify = false)
+    }
+
     /** Show [t] (s). Use this when the user moves the cursor on the chart. */
     fun showTime(t: Double) {
         if (playing && kotlin.math.abs(t - time) > 1e-6) stop()
@@ -150,7 +199,14 @@ class PlaybackBar(context: Context, private val ui: Ui) : LinearLayout(context) 
         onPlaying?.invoke(false)
     }
 
-    private fun toggle() = if (playing) stop() else play()
+    private fun toggle() {
+        val remote = remoteStop
+        when {
+            remote != null -> remote()
+            playing -> stop()
+            else -> play()
+        }
+    }
 
     private fun play() {
         // At the end, or before the start: start again
