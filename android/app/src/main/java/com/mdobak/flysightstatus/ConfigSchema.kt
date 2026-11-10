@@ -1,4 +1,4 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.text.InputType
 import java.util.Locale

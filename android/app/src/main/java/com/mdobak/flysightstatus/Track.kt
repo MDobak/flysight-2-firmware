@@ -1,4 +1,4 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import java.io.File
 import java.time.Instant

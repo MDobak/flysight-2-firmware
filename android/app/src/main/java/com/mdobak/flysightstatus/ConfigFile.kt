@@ -1,4 +1,4 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 /**
  * A FlySight config file (CONFIG.TXT or a profile in /CONFIG).

@@ -1,12 +1,12 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import com.example.flysightstatus.Ui.Companion.MATCH
-import com.example.flysightstatus.Ui.Companion.WRAP
+import com.mdobak.flysightstatus.Ui.Companion.MATCH
+import com.mdobak.flysightstatus.Ui.Companion.WRAP
 import java.util.Locale
 
 /** The main configuration and the profiles in /CONFIG. */

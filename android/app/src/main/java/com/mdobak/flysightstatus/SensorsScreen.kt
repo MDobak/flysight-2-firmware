@@ -1,4 +1,4 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -14,14 +14,14 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.example.flysightstatus.Ui.Companion.MATCH
-import com.example.flysightstatus.Ui.Companion.WRAP
+import com.mdobak.flysightstatus.Ui.Companion.MATCH
+import com.mdobak.flysightstatus.Ui.Companion.WRAP
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
-import com.example.flysightstatus.FlySightProtocol as P
+import com.mdobak.flysightstatus.FlySightProtocol as P
 
 /**
  * Live values of all FlySight sensors. In idle mode, the screen starts

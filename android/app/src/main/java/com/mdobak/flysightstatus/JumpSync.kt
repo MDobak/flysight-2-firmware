@@ -1,4 +1,4 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.os.Handler
 import android.os.Looper

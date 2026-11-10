@@ -1,4 +1,4 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.annotation.SuppressLint
 import android.graphics.Canvas

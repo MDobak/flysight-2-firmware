@@ -1,4 +1,4 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -13,10 +13,10 @@ import android.view.Gravity
 import android.view.View
 import android.webkit.MimeTypeMap
 import android.widget.LinearLayout
-import com.example.flysightstatus.Ui.Companion.MATCH
-import com.example.flysightstatus.Ui.Companion.WRAP
+import com.mdobak.flysightstatus.Ui.Companion.MATCH
+import com.mdobak.flysightstatus.Ui.Companion.WRAP
 import java.util.Locale
-import com.example.flysightstatus.FlySightProtocol as P
+import com.mdobak.flysightstatus.FlySightProtocol as P
 
 /** The file browser for the microSD card of the FlySight. */
 @SuppressLint("SetTextI18n") // English only

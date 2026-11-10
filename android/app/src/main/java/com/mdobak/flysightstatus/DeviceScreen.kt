@@ -1,4 +1,4 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -12,15 +12,15 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.example.flysightstatus.MainActivity.Companion.toHex
-import com.example.flysightstatus.Ui.Companion.MATCH
-import com.example.flysightstatus.Ui.Companion.WRAP
+import com.mdobak.flysightstatus.MainActivity.Companion.toHex
+import com.mdobak.flysightstatus.Ui.Companion.MATCH
+import com.mdobak.flysightstatus.Ui.Companion.WRAP
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.hypot
-import com.example.flysightstatus.FlySightProtocol as P
+import com.mdobak.flysightstatus.FlySightProtocol as P
 
 /** The device tab: the firmware, the debug functions, and the log. */
 @SuppressLint("SetTextI18n") // English only

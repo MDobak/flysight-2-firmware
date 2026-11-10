@@ -1,4 +1,4 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -8,8 +8,8 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import com.example.flysightstatus.Ui.Companion.MATCH
-import com.example.flysightstatus.Ui.Companion.WRAP
+import com.mdobak.flysightstatus.Ui.Companion.MATCH
+import com.mdobak.flysightstatus.Ui.Companion.WRAP
 import java.io.File
 import java.util.Locale
 

@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.flysightstatus"
+    namespace = "com.mdobak.flysightstatus"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.flysightstatus"
+        applicationId = "com.mdobak.flysightstatus"
         minSdk = 33
         targetSdk = 36
         versionCode = 1

@@ -1,16 +1,16 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.app.Dialog
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
-import com.example.flysightstatus.Ui.Companion.MATCH
-import com.example.flysightstatus.Ui.Companion.WRAP
+import com.mdobak.flysightstatus.Ui.Companion.MATCH
+import com.mdobak.flysightstatus.Ui.Companion.WRAP
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
-import com.example.flysightstatus.FlySightProtocol as P
+import com.mdobak.flysightstatus.FlySightProtocol as P
 
 /**
  * Show and set the ground level of the FlySight: the GPS ground level (above

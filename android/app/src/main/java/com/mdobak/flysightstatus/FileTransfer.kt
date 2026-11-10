@@ -1,10 +1,10 @@
-package com.example.flysightstatus
+package com.mdobak.flysightstatus
 
 import android.os.Handler
 import android.os.Looper
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import com.example.flysightstatus.FlySightProtocol as P
+import com.mdobak.flysightstatus.FlySightProtocol as P
 
 /**
  * File operations over the File_Transfer service (crs.c in the firmware).
