@@ -359,41 +359,6 @@ class Ui(val context: Context) {
         }
     }
 
-    /**
-     * Assist chip that opens a choice: a leading icon, the label and a
-     * drop-down arrow. When [active] (a setting that is not the default), the
-     * chip has a tonal background.
-     */
-    inner class AssistChip(label: String, iconRes: Int, onClick: () -> Unit) : TextView(context) {
-        var active = false
-            set(value) {
-                field = value
-                update()
-            }
-        private val iconRes = iconRes
-
-        init {
-            style(this, Type.LABEL_LARGE, onSurface)
-            text = label
-            gravity = Gravity.CENTER_VERTICAL
-            isSingleLine = true
-            minHeight = dp(48)
-            compoundDrawablePadding = dp(8)
-            setPadding(dp(8), 0, dp(8), 0)
-            setOnClickListener { onClick() }
-            update()
-        }
-
-        private fun update() {
-            val bg = if (active) shape(secondaryContainer, 8f) else shape(Color.TRANSPARENT, 8f, outlineVariant)
-            val fg = if (active) onSecondaryContainer else onSurface
-            background = InsetDrawable(ripple(fg, bg, 8f), 0, dp(8), 0, dp(8))
-            setTextColor(fg)
-            setCompoundDrawablesRelative(drawable(iconRes, if (active) fg else primary),
-                null, drawable(R.drawable.ic_arrow_drop_down, if (active) fg else onSurfaceVariant), null)
-        }
-    }
-
     fun chipRow(vararg chips: View) = HorizontalScrollView(context).apply {
         isHorizontalScrollBarEnabled = false
         clipToPadding = false

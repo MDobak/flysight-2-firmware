@@ -1,6 +1,5 @@
 package com.mdobak.flysightstatus
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
@@ -17,6 +16,8 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.mdobak.flysightstatus.Ui.Companion.MATCH
@@ -46,7 +47,11 @@ class TrackActivity : Activity() {
     /** The tracks that show: with the time of the synchronization. */
     private var tracks: List<Track> = emptyList()
     private var sync = TrackSync.default(0)
-    private var syncChip: Ui.AssistChip? = null
+    /** The top bar button that opens the synchronization page. It shows only for several jumps. */
+    private lateinit var syncButton: android.widget.ImageView
+    private var syncPage: SyncPage? = null
+    private val syncBack = OnBackInvokedCallback { closeSync() }
+    private lateinit var frame: FrameLayout
     /** The switch between the 2D map and the 3D view, and the 2D map pane. */
     private lateinit var viewSwitch: View
     private lateinit var mapPane: View
@@ -93,6 +98,8 @@ class TrackActivity : Activity() {
         ), split.mode.ordinal) { setMode(SplitLayout.Mode.entries[it]) }
         updateSplitIcon()
         bar.addAction(layoutGroup)
+        syncButton = ui.iconButton(R.drawable.ic_timer, "Synchronize jumps") { showSync() }.apply { visibility = View.GONE }
+        bar.addAction(syncButton)
         replayButton = ui.iconButton(R.drawable.ic_play, "Replay") { toggleReplay() }
         bar.addAction(replayButton)
         // Secondary actions in an overflow menu: the top bar has little space
@@ -112,7 +119,7 @@ class TrackActivity : Activity() {
             addView(split, LinearLayout.LayoutParams(MATCH, 0, 1f))
             addView(playback, LinearLayout.LayoutParams(MATCH, WRAP))
         }
-        val frame = FrameLayout(this).apply { addView(root) }
+        frame = FrameLayout(this).apply { addView(root) }
         snackbars = ui.SnackbarHost(frame)
         frame.setOnApplyWindowInsetsListener { _, insets ->
             val sys = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
@@ -191,7 +198,6 @@ class TrackActivity : Activity() {
     private fun showMore(anchor: View) {
         if (tracks.isEmpty()) return
         ui.popupMenu(anchor, listOfNotNull(
-            if (tracks.size > 1) "Synchronize jumps" to { showSync() } else null,
             "Jump details" to { showDetails() },
             "Open in Google Earth" to { exportKml(googleEarth = true) },
             "Share as KML file" to { exportKml(googleEarth = false) },
@@ -256,6 +262,8 @@ class TrackActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        // The synchronization must not be lost if the app stops
+        syncPage?.let { setSync(it.value) }
         playback.stop()
         pane3d.view.onPause()
     }
@@ -269,6 +277,12 @@ class TrackActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         split.vertical = newConfig.orientation != Configuration.ORIENTATION_LANDSCAPE
         updateSplitIcon()
+        // The synchronization page has a different layout in landscape
+        syncPage?.let { page ->
+            frame.removeView(page)
+            syncPage = null
+            openSyncPage(page.value)
+        }
     }
 
     /** The split icon shows the chart above the map. In landscape the panes are side by side. */
@@ -322,13 +336,34 @@ class TrackActivity : Activity() {
     /** The preference key of the synchronization of these jumps. */
     private fun syncKey() = "sync:" + files.joinToString("|") { it.path }
 
+    /** Open the synchronization page above the track viewer. */
     private fun showSync() {
-        if (loaded.size < 2) return
-        SyncDialog(ui, loaded, labels, loaded.indices.map { chart.trackColor(it) }, sync) { setSync(it) }.show()
+        if (loaded.size < 2 || syncPage != null) return
+        playback.stop()
+        openSyncPage(sync)
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, syncBack)
+    }
+
+    private fun openSyncPage(value: TrackSync) {
+        val series = TrackChartView.Series.entries.filter { chart.isVisible(it) }.toSet()
+        val page = SyncPage(ui, loaded, labels, loaded.indices.map { chart.trackColor(it) }, value, series) { closeSync() }
+        syncPage = page
+        frame.addView(page, FrameLayout.LayoutParams(MATCH, MATCH))
+        page.requestApplyInsets()
+    }
+
+    /** Close the synchronization page, and show its synchronization in the track viewer. */
+    private fun closeSync() {
+        val page = syncPage ?: return
+        syncPage = null
+        onBackInvokedDispatcher.unregisterOnBackInvokedCallback(syncBack)
+        frame.removeView(page)
+        setSync(page.value)
     }
 
     /** Use a new synchronization. The views keep their position, the cursor and the replay time. */
     private fun setSync(value: TrackSync) {
+        if (value == sync) return
         sync = value
         if (value.isDefault) prefs.edit().remove(syncKey()).apply() else prefs.edit().putString(syncKey(), value.encode()).apply()
         tracks = value.align(loaded)
@@ -337,15 +372,13 @@ class TrackActivity : Activity() {
         map.setCursor(chart.cursor)
         pane3d.view.updateTimes(tracks)
         playback.setTracks(tracks, keepTime = true)
-        updateSyncChip()
+        updateSyncButton()
     }
 
-    @SuppressLint("SetTextI18n") // English only
-    private fun updateSyncChip() {
-        val chip = syncChip ?: return
-        chip.text = "Sync: ${sync.mode.short}" + if (sync.hasOffsets) " · offsets" else ""
-        chip.active = !sync.isDefault
-        chip.contentDescription = "Synchronize jumps. Now: ${sync.mode.label}" + if (sync.hasOffsets) ", with offsets" else ""
+    /** The description of the sync button tells the synchronization now. */
+    private fun updateSyncButton() {
+        syncButton.contentDescription = "Synchronize jumps. Now: ${sync.mode.label}" + if (sync.hasOffsets) ", with offsets" else ""
+        syncButton.tooltipText = "Synchronize jumps"
     }
 
     private fun buildControls(labels: List<String>) {
@@ -360,12 +393,10 @@ class TrackActivity : Activity() {
         }
         seriesRow = ui.chipRow(*seriesChips.toTypedArray()).also { controls.addView(it) }
 
-        syncChip = null
+        syncButton.visibility = if (multi) View.VISIBLE else View.GONE
+        updateSyncButton()
         if (multi) {
-            val chip = ui.AssistChip("", R.drawable.ic_timer) { showSync() }
-            syncChip = chip
-            updateSyncChip()
-            val trackChips = listOf<View>(chip) + labels.mapIndexed { i, label ->
+            val trackChips = labels.mapIndexed { i, label ->
                 val dot = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(chart.trackColor(i))
@@ -399,7 +430,7 @@ class TrackActivity : Activity() {
     }
 
     /** A short line in a colour and a line style, for a legend chip. */
-    private class LineSample(ui: Ui, color: Int, dash: android.graphics.DashPathEffect?) : Drawable() {
+    class LineSample(ui: Ui, color: Int, dash: android.graphics.DashPathEffect?) : Drawable() {
         private val size = ui.dp(18)
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.color = color

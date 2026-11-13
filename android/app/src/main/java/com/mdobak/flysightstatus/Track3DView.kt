@@ -93,8 +93,8 @@ class Track3DPane(context: Context, private val ui: Ui) : FrameLayout(context) {
 
         // The same column as on the 2D map: above the attribution in the bottom-right corner
         addView(ui.mapButton(R.drawable.ic_layers, "Map style and height scale") { showMapOptions() },
-            LayoutParams(ui.dp(48), ui.dp(48), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, ui.dp(8), ui.dp(76)) })
-        addView(followButton, LayoutParams(ui.dp(48), ui.dp(48), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, ui.dp(8), ui.dp(24)) })
+            LayoutParams(ui.dp(48), ui.dp(48), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, ui.dp(8), ui.dp(24)) })
+        addView(followButton, LayoutParams(ui.dp(48), ui.dp(48), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, ui.dp(8), ui.dp(76)) })
         credits.setOnClickListener { showCredits() }
         addView(credits, LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END))
 

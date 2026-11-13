@@ -1,5 +1,8 @@
 package com.mdobak.flysightstatus
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -101,6 +104,46 @@ class TrackChartView(context: Context, private val ui: Ui) : View(context) {
     private val box = RectF()
 
     private val multi get() = tracks.size > 1
+
+    /** The track that the user changes now, or -1. The other tracks show less. */
+    private var focusTrack = -1
+    /** 0: no focus. 1: the other tracks are pale and thin. */
+    private var focusAmount = 0f
+    private var focusAnimator: ValueAnimator? = null
+
+    /** Show the track [index] clearly and the other tracks less. Null shows all tracks equally. */
+    fun setFocus(index: Int?) {
+        if (index != null) focusTrack = index
+        val target = if (index != null) 1f else 0f
+        if (focusAmount == target && focusAnimator?.isRunning != true) return
+        focusAnimator?.cancel()
+        focusAnimator = ValueAnimator.ofFloat(focusAmount, target).apply {
+            duration = FOCUS_MS
+            addUpdateListener {
+                focusAmount = it.animatedValue as Float
+                invalidate()
+            }
+            if (index == null) addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (focusAmount == 0f) focusTrack = -1
+                }
+            })
+            start()
+        }
+    }
+
+    /** Show the time range [from] to [to] (s), in the range of the tracks. */
+    fun showRange(from: Double, to: Double) {
+        val a = from.coerceIn(fullMin, fullMax)
+        val b = to.coerceIn(fullMin, fullMax)
+        if (b - a < MIN_SPAN_S) {
+            resetZoom()
+            return
+        }
+        xMin = a
+        xMax = b
+        invalidate()
+    }
 
     /** Line colour of a series of a track. */
     fun colorOf(series: Series, track: Int): Int =
@@ -280,7 +323,10 @@ class TrackChartView(context: Context, private val ui: Ui) : View(context) {
         canvas.save()
         canvas.clipRect(padLeft, padTop, width - padRight, padTop + plotHeight)
         val glide = ranges[Axis.GLIDE]
-        for ((n, track) in shown()) {
+        // The track in focus is on top of the other tracks
+        for ((n, track) in shown().sortedBy { it.index == focusTrack }) {
+            val dim = if (focusTrack >= 0 && n != focusTrack) focusAmount else 0f
+            linePaint.strokeWidth = (2 - dim) * density
             val from = max(0, track.indexAt(xMin) - 1)
             val to = min(track.size - 1, track.indexAt(xMax) + 1)
             val step = max(1, (to - from) / max(1, (plotWidth * 2).toInt()))
@@ -307,11 +353,13 @@ class TrackChartView(context: Context, private val ui: Ui) : View(context) {
                     i += step
                 }
                 linePaint.color = colorOf(s, n)
+                linePaint.alpha = ((1 - 0.5f * dim) * 255).toInt()
                 linePaint.pathEffect = dashOf(s)
                 canvas.drawPath(path, linePaint)
             }
         }
         canvas.restore()
+        linePaint.strokeWidth = 2 * density
 
         // Cursor and the values at the cursor
         if (cursor in xMin..xMax) {
@@ -449,6 +497,7 @@ class TrackChartView(context: Context, private val ui: Ui) : View(context) {
 
     companion object {
         private const val MIN_SPAN_S = 5.0
+        private const val FOCUS_MS = 150L
 
         /** Line styles for the series when the chart compares tracks. */
         fun dashFor(series: Series, density: Float): DashPathEffect? = when (series) {

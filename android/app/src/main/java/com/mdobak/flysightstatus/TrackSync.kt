@@ -1,27 +1,30 @@
 package com.mdobak.flysightstatus
 
 import android.annotation.SuppressLint
-import android.app.Dialog
-import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.drawable.GradientDrawable
+import android.os.SystemClock
 import android.text.InputType
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowInsets
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.mdobak.flysightstatus.Ui.Companion.MATCH
 import com.mdobak.flysightstatus.Ui.Companion.WRAP
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.roundToLong
 
 /** The point of each jump that is time 0 in a comparison. */
-enum class SyncMode(val label: String, val short: String, val description: String) {
-    EXIT("Exit", "Exit", "Time 0 is the exit of each jump."),
-    OPENING("Canopy opening", "Opening", "Time 0 is the canopy opening of each jump. Use it to compare canopy flights."),
-    GPS("GPS time", "GPS time", "All jumps use the same clock: time 0 is the first exit. Use it for jumps of the same group."),
-    START("Track start", "Start", "Time 0 is the first point of each track."),
+enum class SyncMode(val label: String, val description: String) {
+    EXIT("Exit", "Time 0 is the exit of each jump."),
+    GPS("GPS time", "All jumps use the same clock. Time 0 is the first exit. Use it for jumps of the same group."),
+    START("Track start", "Time 0 is the first point of each track."),
 }
 
 /**
@@ -36,20 +39,19 @@ data class TrackSync(val mode: SyncMode, val offsets: List<Double>) {
 
     val hasOffsets get() = offsets.any { it != 0.0 }
 
-    /** The tracks with their time 0 for this synchronization. */
-    fun align(list: List<Track>): List<Track> {
-        val firstExit = list.minOf { it.exitMs }
-        return list.mapIndexed { i, track ->
-            val zero = when (mode) {
-                SyncMode.EXIT -> track.exitMs
-                // A jump with no opening uses its exit
-                SyncMode.OPENING -> if (track.deployIndex >= 0) track.epochMs[track.deployIndex] else track.exitMs
-                SyncMode.GPS -> firstExit
-                SyncMode.START -> track.epochMs.first()
-            }
-            track.withZero(zero - (offsets.getOrElse(i) { 0.0 } * 1000).roundToLong())
+    /** The time 0 of the jump [i] of [list] (UTC, ms since 1970). */
+    fun zeroMs(list: List<Track>, i: Int): Long {
+        val track = list[i]
+        val zero = when (mode) {
+            SyncMode.EXIT -> track.exitMs
+            SyncMode.GPS -> list.minOf { it.exitMs }
+            SyncMode.START -> track.epochMs.first()
         }
+        return zero - (offsets.getOrElse(i) { 0.0 } * 1000).roundToLong()
     }
+
+    /** The tracks with their time 0 for this synchronization. */
+    fun align(list: List<Track>): List<Track> = list.indices.map { list[it].withZero(zeroMs(list, it)) }
 
     /** The text for preferences: "MODE;offset,offset,...". */
     fun encode() = mode.name + ";" + offsets.joinToString(",") { String.format(Locale.US, "%.2f", it) }
@@ -60,7 +62,7 @@ data class TrackSync(val mode: SyncMode, val offsets: List<Double>) {
 
         fun default(count: Int) = TrackSync(SyncMode.EXIT, List(count) { 0.0 })
 
-        /** Read [encode] text. Text for a different number of jumps gives the default. */
+        /** Read [encode] text. Text for a different number of jumps, or an old mode, gives the default. */
         fun decode(text: String?, count: Int): TrackSync {
             val parts = text?.split(';') ?: return default(count)
             val mode = SyncMode.entries.firstOrNull { it.name == parts[0] } ?: return default(count)
@@ -79,109 +81,147 @@ data class TrackSync(val mode: SyncMode, val offsets: List<Double>) {
 }
 
 /**
- * The dialog that synchronizes the compared jumps. The top part selects time 0,
- * the bottom part sets an offset for each jump. The chart, the map and the 3D
- * view change at once.
+ * The page that synchronizes the compared jumps. A chart at the top shows the
+ * result at once. Below the chart, the user selects time 0 and moves each jump.
+ *
+ * When the user moves a jump, the chart shows that jump clearly and the other
+ * jumps pale and thin. The chart, the map and the 3D view of the track viewer
+ * change when the page closes.
  */
-@SuppressLint("SetTextI18n") // English only
-class SyncDialog(
+@SuppressLint("SetTextI18n", "ViewConstructor") // English only
+class SyncPage(
     private val ui: Ui,
     /** The tracks as loaded (each from its exit). */
     private val tracks: List<Track>,
     private val labels: List<String>,
     private val colors: List<Int>,
     private var sync: TrackSync,
-    private val onChange: (TrackSync) -> Unit,
-) {
-    private val context = ui.context
-    private val modeRadios = mutableListOf<Pair<SyncMode, ImageView>>()
-    private val offsetTexts = mutableListOf<TextView>()
-    private lateinit var resetButton: View
-    private lateinit var dialog: Dialog
+    series: Set<TrackChartView.Series>,
+    private val onClose: (TrackSync) -> Unit,
+) : LinearLayout(ui.context) {
 
-    fun show() {
-        val content = ui.column()
-        content.addView(heading("Time 0"))
-        for (mode in SyncMode.entries) content.addView(modeRow(mode))
+    private val bar = ui.TopBar("Synchronize jumps")
+    private val chart = TrackChartView(context, ui)
+    private val resetButton: View
+    private val modeGroup: Ui.Segmented
+    private val modeDescription = ui.text(Ui.Type.BODY_MEDIUM, "", ui.onSurfaceVariant)
+    private val modeNote = ui.text(Ui.Type.BODY_SMALL, "")
+    private val rows = mutableListOf<View>()
+    private val values = mutableListOf<TextView>()
+    /** The tracks with the times of [sync]. */
+    private var aligned = sync.align(tracks)
+    private var lastTickMs = 0L
 
-        val offsetsHeader = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, ui.dp(16), ui.dp(12), 0)
-            addView(heading("Offsets").apply { setPadding(ui.dp(24), 0, 0, 0) }, LinearLayout.LayoutParams(0, WRAP, 1f))
-            resetButton = ui.button(Ui.ButtonStyle.TEXT, "Reset") { setOffsets(List(tracks.size) { 0.0 }) }
-            addView(resetButton)
+    private val clearFocus = Runnable { focus(null) }
+
+    /** The synchronization on this page now. */
+    val value get() = sync
+
+    init {
+        orientation = VERTICAL
+        setBackgroundColor(ui.surface)
+        isClickable = true // The track viewer below must not get the touches
+
+        bar.setNavigation(R.drawable.ic_back, "Back") { onClose(sync) }
+        resetButton = ui.button(Ui.ButtonStyle.TEXT, "Reset") { reset() }
+        bar.addAction(resetButton)
+
+        chart.setTracks(aligned, labels)
+        for (s in TrackChartView.Series.entries) chart.setVisible(s, s in series)
+        showExits()
+
+        modeGroup = ui.Segmented(SyncMode.entries.map { it.label }, sync.mode.ordinal) { setMode(SyncMode.entries[it]) }
+        val controls = ui.column().apply {
+            addView(ui.header("Time 0"))
+            addView(modeGroup, LayoutParams(MATCH, WRAP).apply { setMargins(ui.dp(16), 0, ui.dp(16), 0) })
+            addView(modeDescription.apply { setPadding(ui.dp(16), ui.dp(8), ui.dp(16), 0) })
+            addView(modeNote.apply { setPadding(ui.dp(16), ui.dp(4), ui.dp(16), 0) })
+            addView(ui.header("Offsets"))
+            for (i in tracks.indices) addView(offsetRow(i), LayoutParams(MATCH, WRAP).apply {
+                setMargins(ui.dp(8), 0, ui.dp(8), ui.dp(4))
+            })
+            addView(ui.note("Drag a slider to move the jump. Drag it farther to move the jump faster. " +
+                "Tap − or + to move it by 0.1 s, or tap the value to type it. A positive offset moves the jump later."))
+            addView(ui.space(16))
         }
-        content.addView(offsetsHeader)
-        for (i in tracks.indices) content.addView(offsetRow(i))
-        content.addView(ui.note("A positive offset moves the jump later on the time axis. Hold − or + to change the offset quickly. " +
-            "Tap the value to type it.").apply { setPadding(ui.dp(24), ui.dp(4), ui.dp(24), 0) })
+        val scroll = ui.scroll(controls)
+        val chips = seriesChips(series)
 
+        addView(bar, LayoutParams(MATCH, WRAP))
+        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            val left = ui.column().apply {
+                addView(chart, LayoutParams(MATCH, 0, 1f))
+                addView(chips, LayoutParams(MATCH, WRAP))
+            }
+            addView(LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                addView(left, LayoutParams(0, MATCH, 1f))
+                addView(scroll, LayoutParams(ui.dp(380), MATCH))
+            }, LayoutParams(MATCH, 0, 1f))
+        } else {
+            addView(chart, LayoutParams(MATCH, 0, 4f))
+            addView(chips, LayoutParams(MATCH, WRAP))
+            addView(ui.divider())
+            addView(scroll, LayoutParams(MATCH, 0, 5f))
+        }
+
+        setOnApplyWindowInsetsListener { _, insets ->
+            val sys = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            // The top bar uses the top inset
+            setPadding(sys.left, 0, sys.right, sys.bottom)
+            insets
+        }
         update()
-        dialog = ui.dialog("Synchronize jumps", content = content, positive = Ui.DialogButton("Done"), negative = null,
-            scrollContent = true)
-        dialog.show()
     }
 
-    private fun heading(text: String) = ui.text(Ui.Type.TITLE_SMALL, text, ui.primary).apply {
-        setPadding(ui.dp(24), 0, ui.dp(24), ui.dp(4))
+    /** The chips of the chart lines. They change only the chart of this page. */
+    private fun seriesChips(series: Set<TrackChartView.Series>): View {
+        val chips = TrackChartView.Series.entries.map { s ->
+            val sample = TrackActivity.LineSample(ui, ui.onSurfaceVariant, TrackChartView.dashFor(s, ui.density))
+            ui.Chip(s.label, sample, showCheck = false) { on -> chart.setVisible(s, on) }.apply { checked = s in series }
+        }
+        return ui.chipRow(*chips.toTypedArray())
+    }
+
+    /** Show the time from before the first exit to after the last exit. */
+    private fun showExits() {
+        val exits = aligned.map { it.exitTime }
+        chart.showRange(exits.min() - RANGE_BEFORE_S, exits.max() + RANGE_AFTER_S)
     }
 
     // ---- Time 0 ----
 
-    private fun modeRow(mode: SyncMode): View {
-        val radio = ui.icon(R.drawable.ic_radio_off)
-        modeRadios += mode to radio
-        val texts = ui.column().apply {
-            addView(ui.text(Ui.Type.BODY_LARGE, mode.label))
-            addView(ui.text(Ui.Type.BODY_SMALL, mode.description, ui.onSurfaceVariant))
-            note(mode)?.let { (text, warning) ->
-                addView(ui.text(Ui.Type.BODY_SMALL, text, if (warning) ui.error else ui.onSurfaceVariant).apply {
-                    setPadding(0, ui.dp(2), 0, 0)
-                })
-            }
-        }
-        val enabled = mode != SyncMode.OPENING || tracks.any { it.deployIndex >= 0 }
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = ui.dp(56)
-            setPadding(ui.dp(24), ui.dp(6), ui.dp(24), ui.dp(6))
-            background = ui.ripple(ui.onSurface, null)
-            addView(radio, LinearLayout.LayoutParams(ui.dp(24), ui.dp(24)).apply { marginEnd = ui.dp(16) })
-            addView(texts, LinearLayout.LayoutParams(0, WRAP, 1f))
-            isEnabled = enabled
-            alpha = if (enabled) 1f else 0.38f
-            setOnClickListener {
-                if (sync.mode == mode) return@setOnClickListener
-                sync = sync.copy(mode = mode)
-                changed()
-            }
-        }
+    private fun setMode(mode: SyncMode) {
+        if (sync.mode == mode) return
+        sync = sync.copy(mode = mode)
+        realign()
+    }
+
+    private fun reset() {
+        sync = TrackSync.default(tracks.size)
+        modeGroup.select(sync.mode.ordinal)
+        realign()
+    }
+
+    private fun realign() {
+        aligned = sync.align(tracks)
+        chart.updateTimes(aligned)
+        showExits()
+        update()
     }
 
     /** An additional line for a mode: a problem of these jumps, and if it is a warning. */
-    private fun note(mode: SyncMode): Pair<String, Boolean>? {
-        val noExit = tracks.count { !it.hasExit }
-        return when (mode) {
-            SyncMode.EXIT -> if (noExit > 0) "${jumps(noExit)} no exit. It uses its first point." to false else null
-            SyncMode.OPENING -> {
-                val noOpening = tracks.count { it.deployIndex < 0 }
-                when (noOpening) {
-                    0 -> null
-                    tracks.size -> "No canopy opening found." to false
-                    else -> "${jumps(noOpening)} no canopy opening. It uses its exit." to false
-                }
-            }
-            SyncMode.GPS -> {
-                val spread = (tracks.maxOf { it.exitMs } - tracks.minOf { it.exitMs }) / 1000.0
-                if (spread > FAR_APART_S) "These jumps are ${duration(spread)} apart. They do not show at the same time." to true else null
-            }
-            SyncMode.START -> null
+    private fun note(mode: SyncMode): Pair<String, Boolean>? = when (mode) {
+        SyncMode.EXIT -> {
+            val noExit = tracks.count { !it.hasExit }
+            if (noExit > 0) "${if (noExit == 1) "1 jump has" else "$noExit jumps have"} no exit. It uses its first point." to false else null
         }
+        SyncMode.GPS -> {
+            val spread = (tracks.maxOf { it.exitMs } - tracks.minOf { it.exitMs }) / 1000.0
+            if (spread > FAR_APART_S) "These jumps are ${duration(spread)} apart. They do not show at the same time." to true else null
+        }
+        SyncMode.START -> null
     }
-
-    private fun jumps(n: Int) = if (n == 1) "1 jump has" else "$n jumps have"
 
     private fun duration(s: Double): String {
         val minutes = (s / 60).roundToLong()
@@ -194,11 +234,15 @@ class SyncDialog(
 
     // ---- Offsets ----
 
+    /**
+     * One jump: the colour, the name and the offset on the first line. The
+     * − button, the speed slider and the + button on the second line.
+     */
     private fun offsetRow(i: Int): View {
         val dot = View(context).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(this@SyncDialog.colors[i])
+                setColor(this@SyncPage.colors[i])
             }
         }
         val label = ui.text(Ui.Type.BODY_LARGE, labels[i]).apply {
@@ -208,29 +252,64 @@ class SyncDialog(
         val value = ui.text(Ui.Type.LABEL_LARGE, "").apply {
             fontFeatureSettings = "tnum"
             gravity = Gravity.CENTER
-            minWidth = ui.dp(76)
+            minWidth = ui.dp(84)
             minHeight = ui.dp(40)
-            setPadding(ui.dp(8), 0, ui.dp(8), 0)
+            setPadding(ui.dp(12), 0, ui.dp(12), 0)
             background = ui.ripple(ui.onSurface, ui.shape(ui.surfaceContainerHighest, 8f), 8f)
             setOnClickListener { typeOffset(i) }
         }
-        offsetTexts += value
-        return LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
+        values += value
+        val slider = JogSlider(ui).apply {
+            contentDescription = "Move ${labels[i]}"
+            onStart = { focus(i) }
+            onStop = {
+                setOffset(i, round2(sync.offsets[i]))
+                releaseFocus()
+            }
+            onJog = { ds -> jog(this, i, ds) }
+            onStep = { dir ->
+                step(i, dir * STEP_S)
+                focus(i)
+                releaseFocus()
+            }
+        }
+        val top = LinearLayout(context).apply {
+            orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = ui.dp(56)
-            setPadding(ui.dp(24), 0, ui.dp(12), 0)
-            addView(dot, LinearLayout.LayoutParams(ui.dp(12), ui.dp(12)).apply { marginEnd = ui.dp(12) })
-            addView(label, LinearLayout.LayoutParams(0, WRAP, 1f))
-            addView(stepButton(i, R.drawable.ic_remove, "Earlier: ${labels[i]}", -1))
-            addView(value, LinearLayout.LayoutParams(WRAP, WRAP))
-            addView(stepButton(i, R.drawable.ic_add, "Later: ${labels[i]}", 1))
+            setPadding(ui.dp(16), ui.dp(4), ui.dp(8), 0)
+            addView(dot, LayoutParams(ui.dp(12), ui.dp(12)).apply { marginEnd = ui.dp(12) })
+            addView(label, LayoutParams(0, WRAP, 1f))
+            addView(value, LayoutParams(WRAP, WRAP))
+        }
+        val bottom = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(ui.dp(4), 0, ui.dp(4), ui.dp(4))
+            addView(stepButton(i, R.drawable.ic_remove, "Earlier by 0.1 s: ${labels[i]}", -1))
+            addView(slider, LayoutParams(0, WRAP, 1f))
+            addView(stepButton(i, R.drawable.ic_add, "Later by 0.1 s: ${labels[i]}", 1))
+        }
+        return ui.column().apply {
+            addView(top)
+            addView(bottom)
+            rows += this
+        }
+    }
+
+    /** Move the jump during a drag of the slider. A tick each second gives a feel of the speed. */
+    private fun jog(slider: View, i: Int, ds: Double) {
+        val old = sync.offsets[i]
+        setOffset(i, old + ds)
+        val now = SystemClock.uptimeMillis()
+        if (floor(old) != floor(sync.offsets[i]) && now - lastTickMs > TICK_MIN_MS) {
+            lastTickMs = now
+            slider.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
         }
     }
 
     /**
-     * A button that changes the offset by 0.1 s. When the user holds it, the
-     * offset changes repeatedly, and after 1 s it changes by 0.5 s at a time.
+     * A button that moves the jump by 0.1 s. When the user holds it, the jump
+     * moves repeatedly, and after 1 s by 0.5 s at a time.
      */
     @SuppressLint("ClickableViewAccessibility")
     private fun stepButton(i: Int, iconRes: Int, description: String, direction: Int): ImageView {
@@ -249,19 +328,23 @@ class SyncDialog(
             true
         }
         button.setOnTouchListener { _, e ->
-            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) button.removeCallbacks(repeat)
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> focus(i)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    button.removeCallbacks(repeat)
+                    releaseFocus()
+                }
+            }
             false
         }
         return button
     }
 
-    private fun step(i: Int, ds: Double) {
-        val v = ((sync.offsets[i] + ds) * 10).roundToLong() / 10.0
-        setOffset(i, v)
-    }
+    private fun step(i: Int, ds: Double) = setOffset(i, ((sync.offsets[i] + ds) * 10).roundToLong() / 10.0)
 
     private fun typeOffset(i: Int) {
         val current = sync.offsets[i]
+        focus(i)
         ui.inputDialog(
             "Offset: ${labels[i]}",
             if (current == 0.0) "" else String.format(Locale.US, "%.2f", current).trimEnd('0').trimEnd('.'),
@@ -279,49 +362,76 @@ class SyncDialog(
             },
         ) { text ->
             val v = if (text.isBlank()) 0.0 else parse(text) ?: return@inputDialog
-            setOffset(i, (v * 100).roundToLong() / 100.0)
-        }.show()
+            setOffset(i, round2(v))
+        }.apply {
+            // The chart shows the new position for a short time after the dialog closes
+            setOnDismissListener { releaseFocus(TYPED_FOCUS_MS) }
+            show()
+        }
     }
 
     /** A number, also with a comma as the decimal mark and with a "−" sign. */
     private fun parse(text: String) = text.trim().replace(',', '.').replace('−', '-').toDoubleOrNull()
 
+    private fun round2(v: Double) = (v * 100).roundToLong() / 100.0
+
     private fun setOffset(i: Int, v: Double) {
         val clamped = v.coerceIn(-TrackSync.MAX_OFFSET, TrackSync.MAX_OFFSET)
         if (clamped == sync.offsets[i]) return
-        setOffsets(sync.offsets.toMutableList().also { it[i] = clamped })
-    }
-
-    private fun setOffsets(offsets: List<Double>) {
-        if (offsets == sync.offsets) return
-        sync = sync.copy(offsets = offsets)
-        changed()
-    }
-
-    private fun changed() {
+        sync = sync.copy(offsets = sync.offsets.toMutableList().also { it[i] = clamped })
+        // Only this track changes: a drag makes a new track in each frame
+        aligned = aligned.toMutableList().also { it[i] = tracks[i].withZero(sync.zeroMs(tracks, i)) }
+        chart.updateTimes(aligned)
         update()
-        onChange(sync)
+    }
+
+    // ---- Focus ----
+
+    /** Show the jump [i] clearly on the chart and in the list. Null shows all jumps equally. */
+    private fun focus(i: Int?) {
+        removeCallbacks(clearFocus)
+        chart.setFocus(i)
+        for ((n, row) in rows.withIndex()) row.background = if (n == i) ui.shape(ui.surfaceContainerHigh, 16f) else null
+    }
+
+    private fun releaseFocus(delayMs: Long = FOCUS_HOLD_MS) {
+        removeCallbacks(clearFocus)
+        postDelayed(clearFocus, delayMs)
     }
 
     private fun update() {
-        for ((mode, radio) in modeRadios) {
-            val on = mode == sync.mode
-            radio.setImageResource(if (on) R.drawable.ic_radio_on else R.drawable.ic_radio_off)
-            radio.imageTintList = ColorStateList.valueOf(if (on) ui.primary else ui.onSurfaceVariant)
+        modeDescription.text = sync.mode.description
+        val note = note(sync.mode)
+        modeNote.visibility = if (note == null) GONE else VISIBLE
+        if (note != null) {
+            modeNote.text = note.first
+            modeNote.setTextColor(if (note.second) ui.error else ui.onSurfaceVariant)
         }
-        for ((i, text) in offsetTexts.withIndex()) {
+        for ((i, text) in values.withIndex()) {
             val v = sync.offsets[i]
             text.text = TrackSync.formatOffset(v)
-            text.setTextColor(if (v == 0.0) ui.onSurfaceVariant else ui.onSurface)
+            text.setTextColor(if (round2(v) == 0.0) ui.onSurfaceVariant else ui.onSurface)
             text.contentDescription = "Offset of ${labels[i]}: ${TrackSync.formatOffset(v)}. Tap to type a value."
         }
-        resetButton.isEnabled = sync.hasOffsets
+        resetButton.isEnabled = !sync.isDefault
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        removeCallbacks(clearFocus)
     }
 
     companion object {
         private const val STEP_S = 0.1
         private const val FAST_STEP_S = 0.5
         private const val REPEAT_MS = 90L
+        /** The chart shows the changed jump for this time after the touch stops (ms). */
+        private const val FOCUS_HOLD_MS = 900L
+        private const val TYPED_FOCUS_MS = 1500L
+        private const val TICK_MIN_MS = 60L
+        /** The chart shows this time before the first exit and after the last exit (s). */
+        private const val RANGE_BEFORE_S = 10.0
+        private const val RANGE_AFTER_S = 50.0
         /** With GPS time, jumps more than this apart (s) do not overlap. */
         private const val FAR_APART_S = 15 * 60.0
     }
