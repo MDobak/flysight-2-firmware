@@ -47,6 +47,9 @@ class TrackActivity : Activity() {
     private var tracks: List<Track> = emptyList()
     private var sync = TrackSync.default(0)
     private var syncChip: Ui.AssistChip? = null
+    /** The switch between the 2D map and the 3D view, and the 2D map pane. */
+    private lateinit var viewSwitch: View
+    private lateinit var mapPane: View
     private var labels: List<String> = emptyList()
     /** The chips of the chart lines. They are hidden when only the map shows. */
     private var seriesRow: View? = null
@@ -133,6 +136,7 @@ class TrackActivity : Activity() {
             previous?.invoke(it)
             pane3d.view.setCursor(it)
         }
+        this.mapPane = mapPane
         val is3d = prefs.getBoolean(PREF_3D, false)
         val switch = ui.IconToggleGroup(listOf(
             R.drawable.ic_view_2d to "2D map",
@@ -141,6 +145,7 @@ class TrackActivity : Activity() {
             background = ui.shape(ui.surfaceContainerHigh, 18f)
             elevation = ui.dpf(3f)
         }
+        viewSwitch = switch
         show3d(is3d, mapPane)
         return FrameLayout(this).apply {
             addView(mapPane, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -229,10 +234,24 @@ class TrackActivity : Activity() {
         }.start()
     }
 
-    private fun show3d(on: Boolean, mapPane: View) {
+    /** Show the 3D view or the 2D map. [save] keeps the choice for the next tracks. */
+    private fun show3d(on: Boolean, mapPane: View, save: Boolean = true) {
         mapPane.visibility = if (on) View.INVISIBLE else View.VISIBLE
         pane3d.visibility = if (on) View.VISIBLE else View.GONE
-        prefs.edit().putBoolean(PREF_3D, on).apply()
+        if (save) prefs.edit().putBoolean(PREF_3D, on).apply()
+    }
+
+    /**
+     * Jumps that are far apart do not fit in one 3D view. Then only the 2D map
+     * shows, and the user choice of the 3D view stays for other jumps.
+     */
+    private fun check3d(list: List<Track>) {
+        if (Track3DView.canShow(list)) return
+        viewSwitch.visibility = View.GONE
+        if (pane3d.visibility == View.VISIBLE) {
+            show3d(false, mapPane, save = false)
+            snackbars.show("The jumps are too far apart for the 3D view. The map shows them.")
+        }
     }
 
     override fun onPause() {
@@ -291,10 +310,11 @@ class TrackActivity : Activity() {
         tracks = if (sync.isDefault) list else sync.align(list)
         val sameDay = files.mapNotNull { TrackStore.dateOf(it) }.distinct().size <= 1
         labels = files.map { TrackStore.shortLabel(it, withDate = !sameDay) }
-        chart.setTracks(list, labels)
-        map.setTracks(list)
-        pane3d.view.setTracks(list)
-        playback.setTracks(list)
+        chart.setTracks(tracks, labels)
+        map.setTracks(tracks)
+        check3d(list)
+        pane3d.view.setTracks(tracks)
+        playback.setTracks(tracks)
         buildControls(labels)
         if (list.none { it.hasExit }) snackbars.show("No exit found. Time is from the first point.")
     }

@@ -1092,7 +1092,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             private const val MAX_IMAGE = 4096
             private const val MAX_TERRAIN_ZOOM = 15
             private const val EARTH = 40075016.686
-            private const val PRE_EXIT_S = 10.0
+            const val PRE_EXIT_S = 10.0
             private const val CACHE_MAX_AGE_MS = 30L * 24 * 3600 * 1000
             private const val USER_AGENT = "FlySight-mdobak/1.0 (Android; private app for FlySight 2)"
 
@@ -1671,6 +1671,29 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
     }
 
     companion object {
+        /** The largest area that the 3D view shows (m): one terrain mesh is too coarse for more. */
+        private const val MAX_EXTENT_M = 50_000.0
+
+        /**
+         * True if the 3D view can show the tracks: the shown parts (from 10 s
+         * before the exit) are in an area of not more than 50 km.
+         */
+        fun canShow(tracks: List<Track>): Boolean {
+            var minLat = Double.MAX_VALUE
+            var maxLat = -Double.MAX_VALUE
+            var minLon = Double.MAX_VALUE
+            var maxLon = -Double.MAX_VALUE
+            for (track in tracks) for (i in track.indexBeforeExit(Scene.PRE_EXIT_S) until track.size) {
+                minLat = min(minLat, track.lat[i]); maxLat = max(maxLat, track.lat[i])
+                minLon = min(minLon, track.lon[i]); maxLon = max(maxLon, track.lon[i])
+            }
+            if (minLat > maxLat) return true
+            val m = 111_320.0
+            val dx = (maxLon - minLon) * m * cos(Math.toRadians((minLat + maxLat) / 2))
+            val dy = (maxLat - minLat) * m
+            return hypot(dx, dy) <= MAX_EXTENT_M
+        }
+
         private const val FOV = 45.0
         private const val MIN_DISTANCE = 50f
         private const val MAX_DISTANCE = 200_000f
