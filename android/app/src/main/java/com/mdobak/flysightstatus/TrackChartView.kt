@@ -154,6 +154,12 @@ class TrackChartView(context: Context, private val ui: Ui) : View(context) {
     /** Line style of a series. With one track, all lines are solid. */
     fun dashOf(series: Series): DashPathEffect? = if (!multi) null else dashFor(series, density)
 
+    /** New names of the tracks, for the values at the cursor. */
+    fun setLabels(names: List<String>) {
+        labels = names
+        invalidate()
+    }
+
     fun setTracks(list: List<Track>, names: List<String>) {
         tracks = list
         labels = names

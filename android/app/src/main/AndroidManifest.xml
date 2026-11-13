@@ -35,7 +35,36 @@
             android:name=".TrackActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false" />
-        <!-- Read access to the exported KML files for Google Earth and the share target -->
+        <!-- Receives track files: "Open with" and "Share to" from other apps (Quick Share, messengers, files) -->
+        <activity
+            android:name=".ImportActivity"
+            android:label="@string/receive_label"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustNothing"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/comma-separated-values" />
+                <data android:mimeType="text/x-csv" />
+                <data android:mimeType="text/x-comma-separated-values" />
+                <data android:mimeType="application/csv" />
+                <data android:mimeType="application/x-csv" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/csv" />
+                <data android:mimeType="text/comma-separated-values" />
+                <data android:mimeType="text/x-csv" />
+                <data android:mimeType="text/x-comma-separated-values" />
+                <data android:mimeType="application/csv" />
+                <data android:mimeType="application/x-csv" />
+            </intent-filter>
+        </activity>
+        <!-- Read access to the exported KML files and the shared tracks -->
         <provider
             android:name=".ExportProvider"
             android:authorities="${applicationId}.export"

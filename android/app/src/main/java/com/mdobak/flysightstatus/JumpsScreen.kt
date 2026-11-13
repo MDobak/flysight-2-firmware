@@ -30,8 +30,10 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
     private val fab = ui.fab("Compare", R.drawable.ic_compare) { compareSelected() }
 
     private val selectButton = ui.iconButton(R.drawable.ic_compare, "Select jumps to compare") { startSelection(null) }
-    private val importButton = ui.iconButton(R.drawable.ic_add, "Import a CSV file") { pickCsv() }
+    private val importButton = ui.iconButton(R.drawable.ic_add, "Import CSV files") { pickCsv() }
     private val refreshButton = ui.iconButton(R.drawable.ic_refresh, "Read the FlySight again") { findRemote() }
+    private val shareButton = ui.iconButton(R.drawable.ic_share, "Share the selected jumps") { shareSelected() }
+    private val editButton = ui.iconButton(R.drawable.ic_edit, "Name and owner") { editSelected() }
     private val deleteButton = ui.iconButton(R.drawable.ic_delete, "Delete the selected jumps") { confirmDelete() }
 
     private var segment = 0
@@ -51,6 +53,8 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
         bar.addAction(selectButton)
         bar.addAction(importButton)
         bar.addAction(refreshButton)
+        bar.addAction(shareButton)
+        bar.addAction(editButton)
         bar.addAction(deleteButton)
 
         val panes = FrameLayout(main).apply {
@@ -113,6 +117,8 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
         importButton.visibility = selectButton.visibility
         refreshButton.visibility = if (segment == 1 && !selecting && main.connected) View.VISIBLE else View.GONE
         deleteButton.visibility = if (selecting && selected.isNotEmpty()) View.VISIBLE else View.GONE
+        shareButton.visibility = deleteButton.visibility
+        editButton.visibility = if (selecting && selected.size == 1) View.VISIBLE else View.GONE
         if (selecting) {
             bar.title.text = if (selected.isEmpty()) "Select jumps" else "${selected.size} selected"
             bar.setNavigation(R.drawable.ic_close, "Stop selection") { endSelection() }
@@ -144,21 +150,22 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
         selected.retainAll(files.map { it.path }.toSet())
         if (files.isEmpty()) {
             phoneList.addView(ui.emptyState(R.drawable.ic_jumps, "No jumps on this phone",
-                "Get jumps from the FlySight on the Home screen, or import a TRACK.CSV file.",
-                ui.button(Ui.ButtonStyle.TONAL, "Import a CSV file", R.drawable.ic_add) { pickCsv() }))
+                "Get jumps from the FlySight on the Home screen. You can also import TRACK.CSV files, or open the jumps that other people send to you.",
+                ui.button(Ui.ButtonStyle.TONAL, "Import CSV files", R.drawable.ic_add) { pickCsv() }))
             updateBar()
             return
         }
         var group: String? = null
+        val own = TrackStore.ownDevices(main)
         for (file in files) {
             val date = TrackStore.dateOf(file)
-            val title = date?.let { dayTitle(it) } ?: "Imported"
+            val title = date?.let { dayTitle(it) } ?: "No date"
             if (title != group) {
                 group = title
                 phoneList.addView(ui.header(title))
             }
-            val headline = if (TrackStore.isSession(file)) TrackStore.shortLabel(file, withDate = false) else file.nameWithoutExtension
-            val item = HomeScreen.jumpItem(ui, file, headline)
+            val headline = TrackStore.customName(file) ?: TrackStore.timeLabel(file, withDate = false)
+            val item = HomeScreen.jumpItem(ui, file, headline, who = TrackStore.who(file, own))
             if (selecting) item.setLeading(checkIcon(file.path in selected))
             item.onClick {
                 if (selecting) toggle(file, item) else TrackActivity.open(main, file)
@@ -167,7 +174,7 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
             }
             phoneList.addView(item)
         }
-        phoneList.addView(ui.note("Hold a jump to select it. Select 2 or more jumps to compare them."))
+        phoneList.addView(ui.note("Hold a jump to select it. Then you can compare, share, rename or delete the selected jumps."))
         updateBar()
     }
 
@@ -204,9 +211,23 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
     }
 
     private fun compareSelected() {
-        val files = TrackStore.list(main).filter { it.path in selected }.reversed()
+        val files = selectedFiles()
         if (files.size < 2) return
         TrackActivity.open(main, files)
+    }
+
+    private fun selectedFiles() = TrackStore.list(main).filter { it.path in selected }.reversed()
+
+    private fun shareSelected() {
+        JumpSharing.share(main, selectedFiles()) { main.snack(it, long = true) }
+    }
+
+    private fun editSelected() {
+        val file = selectedFiles().singleOrNull() ?: return
+        JumpSharing.editNames(ui, file) {
+            endSelection()
+            main.snack("Saved.")
+        }
     }
 
     private fun confirmDelete() {
@@ -224,32 +245,19 @@ class JumpsScreen(main: MainActivity) : Screen(main) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream"))
+            putExtra(Intent.EXTRA_MIME_TYPES, JumpSharing.RECEIVE_MIME + arrayOf("text/plain", "application/octet-stream"))
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
         @Suppress("DEPRECATION")
         main.startActivityForResult(intent, MainActivity.REQUEST_IMPORT)
     }
 
+    /** The receive screen saves the selected files, and shows the result. */
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        val uri = data?.data
-        if (requestCode != MainActivity.REQUEST_IMPORT || resultCode != Activity.RESULT_OK || uri == null) return
-        Thread {
-            val result = runCatching {
-                val bytes = main.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw IllegalStateException("Cannot open the file")
-                val name = main.displayName(uri)?.substringBeforeLast('.') ?: "import"
-                // Parse first, so that only usable files are saved.
-                val track = Track.parse(name, bytes.toString(Charsets.ISO_8859_1))
-                TrackStore.saveParsed(main, name, bytes, track)
-            }
-            main.runOnUiThread {
-                if (main.isDestroyed) return@runOnUiThread
-                result.onSuccess {
-                    if (segment != 0) showSegment(0) else updatePhone()
-                    TrackActivity.open(main, it)
-                }.onFailure { main.snack("Cannot import the file: ${it.message}", long = true) }
-            }
-        }.start()
+        if (requestCode != MainActivity.REQUEST_IMPORT || resultCode != Activity.RESULT_OK || data == null) return
+        val uris = data.clipData?.let { clip -> (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } }
+            ?: listOfNotNull(data.data)
+        ImportActivity.start(main, uris)
     }
 
     // ---- On FlySight ----

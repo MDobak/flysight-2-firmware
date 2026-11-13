@@ -29,6 +29,7 @@ import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import com.mdobak.flysightstatus.Ui.Companion.MATCH
 import com.mdobak.flysightstatus.Ui.Companion.WRAP
+import java.io.File
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -64,6 +65,14 @@ class MainActivity : Activity(), FlySightConnection.Listener {
     var mode = DeviceMode.UNKNOWN
         private set
     val info = linkedMapOf<String, String>()
+    /** DEVICE_ID of the connected FlySight (lowercase hex, as in TRACK.CSV), or null. */
+    var deviceId: String? = null
+        private set
+    /**
+     * The key of the default owner of the connected FlySight: its device ID, or its
+     * BLE address until the app knows the ID. See [setDeviceId].
+     */
+    val ownerKey: String? get() = deviceId ?: connection?.device?.address?.let { OWNER_ADDRESS_KEY + it }
     var updated: LocalTime? = null
         private set
     val connected get() = state == FlySightConnection.State.READY && connection != null
@@ -108,6 +117,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        TrackStore.init(this)
         ui = Ui(this)
         ui.setUpWindow(this)
         sync = JumpSync(this)
@@ -151,12 +161,18 @@ class MainActivity : Activity(), FlySightConnection.Listener {
             t.view.visibility = View.GONE
             content.addView(t.view, FrameLayout.LayoutParams(MATCH, MATCH))
         }
-        selectTab((savedInstanceState?.getInt(STATE_TAB) ?: 0).coerceIn(tabs.indices))
+        selectTab((savedInstanceState?.getInt(STATE_TAB) ?: intent.getIntExtra(EXTRA_TAB, 0)).coerceIn(tabs.indices))
 
         registerReceiver(bondReceiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), Context.RECEIVER_NOT_EXPORTED)
         onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback)
 
         autoConnect()
+    }
+
+    /** The receive screen opens a tab ([EXTRA_TAB]) in the running app. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.hasExtra(EXTRA_TAB)) selectTab(intent.getIntExtra(EXTRA_TAB, 0).coerceIn(tabs.indices))
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -266,6 +282,70 @@ class MainActivity : Activity(), FlySightConnection.Listener {
             else -> return f
         }
         return null
+    }
+
+    /**
+     * A track from the connected FlySight gives its device ID. The FlySight cannot send
+     * it over BLE: the ID is longer than the data in a control point response.
+     */
+    fun learnDeviceId(file: File) {
+        if (deviceId != null || connection == null) return
+        TrackStore.deviceId(file)?.let {
+            setDeviceId(it)
+            TrackStore.addDefaultOwner(file)
+            onStateChanged()
+        }
+    }
+
+    /** The default owner of the connected FlySight, or of the last FlySight if the app is not connected. */
+    val deviceOwner: String?
+        get() {
+            val address = connection?.device?.address ?: prefs.getString(PREF_ADDRESS, null) ?: return null
+            val id = deviceId ?: prefs.getString(PREF_DEVICE_ID + address, null)
+            return id?.let { TrackStore.deviceOwner(it) } ?: TrackStore.deviceOwner(OWNER_ADDRESS_KEY + address)
+        }
+
+    /** "Anna's FlySight" if the FlySight has an owner, else [name]. */
+    fun ownedName(name: String): String = deviceOwner?.let { "$it's $name" } ?: name
+
+    /** The device ID of the connected FlySight. If the app does not know it, it uses the ID from the last connection. */
+    fun findDeviceId(): String? {
+        if (deviceId != null) return deviceId
+        val address = connection?.device?.address ?: return null
+        val id = prefs.getString(PREF_DEVICE_ID + address, null)
+        if (id != null) setDeviceId(id)
+        return id
+    }
+
+    /**
+     * Find the device ID of the connected FlySight. If the app does not know it, it reads
+     * FLYSIGHT.TXT on the FlySight. [done] gets null if the FlySight cannot send the file.
+     */
+    fun readDeviceId(done: (String?) -> Unit) {
+        findDeviceId()?.let { return done(it) }
+        val f = files
+        if (f == null || f.busy || sync.running) return done(null)
+        f.read("/FLYSIGHT.TXT", progress = {}) { r ->
+            r.onSuccess { bytes ->
+                val id = bytes.toString(Charsets.ISO_8859_1).lineSequence()
+                    .firstNotNullOfOrNull { DEVICE_ID_LINE.matchEntire(it.trim())?.groupValues?.get(1) }
+                if (id != null && connection != null && deviceId == null) setDeviceId(id.lowercase(Locale.US))
+                if (id == null) log("Device ID: FLYSIGHT.TXT has no Device_ID")
+            }.onFailure { log("Device ID: cannot read FLYSIGHT.TXT: ${it.message}") }
+            done(deviceId)
+        }
+    }
+
+    /** Keep the device ID for the next connection, and move an owner that the user set before the app knew the ID. */
+    private fun setDeviceId(id: String) {
+        deviceId = id
+        val address = connection?.device?.address ?: return
+        prefs.edit().putString(PREF_DEVICE_ID + address, id).apply()
+        val key = OWNER_ADDRESS_KEY + address
+        TrackStore.deviceOwner(key)?.let { owner ->
+            if (TrackStore.deviceOwner(id) == null) TrackStore.setDeviceOwner(id, owner)
+            TrackStore.setDeviceOwner(key, null)
+        }
     }
 
     /** Text for a failed file operation, with a hint if the mode is not idle. */
@@ -580,6 +660,9 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         c.setNotifications(P.STARTER_PISTOL_SERVICE, P.SP_CONTROL_POINT, true)
         c.setNotifications(P.STARTER_PISTOL_SERVICE, P.SP_RESULT, true)
         c.setNotifications(P.BATTERY_SERVICE, P.BATTERY_LEVEL, true)
+        // The device ID identifies the jumps from this FlySight, for the owner name
+        sendDs(P.DS_CMD_GET_DEVICE_ID)
+        findDeviceId()
         handler.removeCallbacks(keepAlive)
         handler.postDelayed(keepAlive, KEEP_ALIVE_MS)
     }
@@ -589,6 +672,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         mode = DeviceMode.UNKNOWN
         sync.forget()
         info.clear()
+        deviceId = null
         updated = null
     }
 
@@ -687,6 +771,9 @@ class MainActivity : Activity(), FlySightConnection.Listener {
             P.FIRMWARE_REVISION -> info[INFO_FIRMWARE] = value.asText()
             P.MANUFACTURER_NAME -> info[INFO_MANUFACTURER] = value.asText()
             P.MODEL_NUMBER -> info[INFO_MODEL] = value.asText()
+            P.DS_CONTROL_POINT -> CpResponse.parse(value)?.let { r ->
+                if (r.opcode == P.DS_CMD_GET_DEVICE_ID && r.success && r.data.isNotEmpty()) setDeviceId(r.dataText.trim().lowercase(Locale.US))
+            }
         }
         updated = LocalTime.now()
         (tabs + pushed).forEach { it.onValue(characteristic, value) }
@@ -710,7 +797,11 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         const val MAX_UPLOAD_SIZE = 4 * 1024 * 1024
         private const val MAX_LOG_LINES = 1000
         private const val STATE_TAB = "tab"
+        const val EXTRA_TAB = "tab"
         private const val PREF_ADDRESS = "lastAddress"
+        private const val PREF_DEVICE_ID = "deviceId:"
+        private const val OWNER_ADDRESS_KEY = "address:"
+        private val DEVICE_ID_LINE = Regex("""Device_ID:\s*([0-9a-fA-F]{24})""")
         private const val PREF_NAME = "lastName"
 
         const val INFO_FIRMWARE = "Firmware"

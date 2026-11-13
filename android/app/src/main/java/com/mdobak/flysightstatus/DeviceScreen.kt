@@ -61,9 +61,6 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
     private val uploadButton = ui.button(Ui.ButtonStyle.TONAL, "Upload a file", R.drawable.ic_upload) { pickFirmware() }
     private val installButton = ui.button(Ui.ButtonStyle.FILLED, "Install") { install() }
 
-    /** The device ID from DS_CMD_GET_DEVICE_ID, or null. */
-    private var deviceId: String? = null
-    private var deviceIdAsked = false
     /** True if the app read /FW in this connection. Then [fwFile] is the file, or null if there is no file. */
     private var fwKnown = false
     private var fwFile: FileInfo? = null
@@ -145,13 +142,12 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
         gnssItems.values.forEach { it.setSupporting("–") }
         dsResult.setSupporting("–")
         spResult.setSupporting("–")
-        deviceIdAsked = false
         fwKnown = false
         fwFile = null
     }
 
     private fun updateStatus() {
-        bar.title.text = main.deviceName ?: "Device"
+        bar.title.text = main.deviceName?.let { main.ownedName(it) } ?: "Device"
         connectButton.text = if (main.connection != null) "Disconnect" else "Connect"
         notConnected.removeAllViews()
         if (main.connection == null && currentTab != TAB_LOG) {
@@ -206,6 +202,7 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
         fwVersion.text = main.info[MainActivity.INFO_FIRMWARE] ?: "–"
         fwModel.text = listOfNotNull(main.info[MainActivity.INFO_MODEL], main.info[MainActivity.INFO_MANUFACTURER])
             .joinToString(" · ").ifEmpty { "Connect to read the firmware version." }
+        val deviceId = main.deviceId
         fwDeviceId.text = deviceId?.let { "Device ID $it" } ?: ""
         fwDeviceId.visibility = if (deviceId == null) View.GONE else View.VISIBLE
         val file = fwFile
@@ -221,10 +218,6 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
         uploadButton.isEnabled = !busy
         installButton.isEnabled = !busy && main.connected && !(fwKnown && file == null)
         if (currentTab == TAB_FIRMWARE && main.connected) {
-            if (deviceId == null && !deviceIdAsked) {
-                deviceIdAsked = true
-                main.sendDs(P.DS_CMD_GET_DEVICE_ID)
-            }
             if (!fwKnown) refreshFirmwareFile()
         }
     }
@@ -471,10 +464,7 @@ class DeviceScreen(main: MainActivity) : Screen(main) {
 
     private fun onDsResponse(r: CpResponse) {
         when (r.opcode) {
-            P.DS_CMD_GET_DEVICE_ID -> if (r.success && r.data.isNotEmpty()) {
-                deviceId = r.dataText
-                updateFirmware()
-            }
+            P.DS_CMD_GET_DEVICE_ID -> if (r.success && r.data.isNotEmpty()) updateFirmware()
             P.DS_CMD_INSTALL_FIRMWARE -> if (r.success) {
                 main.snack("The FlySight installs the firmware. Connect again after it restarts.")
             } else {

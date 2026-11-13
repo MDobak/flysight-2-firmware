@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">FlySight</string>
+    <string name="receive_label">FlySight jumps</string>
     <string name="no_target">No target. Tap the map.</string>
 </resources>

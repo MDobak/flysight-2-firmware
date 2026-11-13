@@ -58,12 +58,15 @@ class TrackActivity : Activity() {
     private var labels: List<String> = emptyList()
     /** The chips of the chart lines. They are hidden when only the map shows. */
     private var seriesRow: View? = null
+    /** The chips of the tracks, in a comparison. */
+    private var trackChips: List<Ui.Chip> = emptyList()
     private var files: List<File> = emptyList()
 
     private val prefs by lazy { getSharedPreferences("track_viewer", Context.MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        TrackStore.init(this)
         ui = Ui(this)
         ui.setUpWindow(this)
         files = intent.getStringArrayExtra(EXTRA_FILES)?.map { File(it) } ?: emptyList()
@@ -197,11 +200,36 @@ class TrackActivity : Activity() {
 
     private fun showMore(anchor: View) {
         if (tracks.isEmpty()) return
+        val multi = files.size > 1
         ui.popupMenu(anchor, listOfNotNull(
+            (if (multi) "Share ${files.size} jumps" else "Share jump") to {
+                JumpSharing.share(this, files) { snackbars.show(it, long = true) }
+            },
+            (if (multi) "Names and owners" else "Name and owner") to { editNames() },
             "Jump details" to { showDetails() },
             "Open in Google Earth" to { exportKml(googleEarth = true) },
             "Share as KML file" to { exportKml(googleEarth = false) },
         ))
+    }
+
+    /** Edit the name of a jump and the owner of its FlySight. In a comparison, select the jump first. */
+    private fun editNames() {
+        if (files.size == 1) return JumpSharing.editNames(ui, files[0]) { updateNames() }
+        ui.menuDialog("Select a jump", files.mapIndexed { i, file ->
+            "${labels.getOrElse(i) { TrackStore.title(file) }} · ${TrackStore.timeLabel(file, withDate = false)}" to {
+                JumpSharing.editNames(ui, file) { updateNames() }
+            }
+        }).show()
+    }
+
+    /** Show the new names in the top bar, the chips and the chart. */
+    private fun updateNames() {
+        if (files.size == 1) bar.title.text = TrackStore.title(files[0])
+        if (loaded.isEmpty()) return
+        labels = TrackStore.labels(files)
+        chart.setLabels(labels)
+        trackChips.forEachIndexed { i, chip -> chip.text = labels.getOrElse(i) { chip.text.toString() } }
+        snackbars.show("Saved.")
     }
 
     /** Write the KML file, then open it in Google Earth or in the share sheet. */
@@ -322,8 +350,7 @@ class TrackActivity : Activity() {
         loaded = list
         sync = if (list.size > 1) TrackSync.decode(prefs.getString(syncKey(), null), list.size) else TrackSync.default(list.size)
         tracks = if (sync.isDefault) list else sync.align(list)
-        val sameDay = files.mapNotNull { TrackStore.dateOf(it) }.distinct().size <= 1
-        labels = files.map { TrackStore.shortLabel(it, withDate = !sameDay) }
+        labels = TrackStore.labels(files)
         chart.setTracks(tracks, labels)
         map.setTracks(tracks)
         check3d(list)
@@ -396,7 +423,7 @@ class TrackActivity : Activity() {
         syncButton.visibility = if (multi) View.VISIBLE else View.GONE
         updateSyncButton()
         if (multi) {
-            val trackChips = labels.mapIndexed { i, label ->
+            trackChips = labels.mapIndexed { i, label ->
                 val dot = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(chart.trackColor(i))

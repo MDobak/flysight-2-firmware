@@ -87,6 +87,27 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         updateCard()
     }
 
+    /**
+     * Edit the default owner of the connected FlySight. If the app cannot get the device ID,
+     * it keeps the owner until the first download from this FlySight.
+     */
+    private fun editOwner() {
+        if (ownerReading) return
+        ownerReading = true
+        main.readDeviceId { id ->
+            ownerReading = false
+            val key = id ?: main.ownerKey ?: return@readDeviceId
+            JumpSharing.editDeviceOwner(ui, key) {
+                updateCard()
+                updateJumps()
+                main.snack("Saved.")
+            }
+        }
+    }
+
+    /** True while the app reads the device ID for [editOwner]. */
+    private var ownerReading = false
+
     /** How to start each FlySight mode with the button, and what the LED shows. */
     private fun showModesHelp() {
         val list = ui.column().apply { setPadding(ui.dp(24), 0, ui.dp(24), 0) }
@@ -210,7 +231,7 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         val ready = main.connected
         val connecting = main.connection != null && !ready
         val sync = main.sync
-        name.text = main.deviceName ?: main.rememberedName ?: "FlySight"
+        name.text = main.ownedName(main.deviceName ?: main.rememberedName ?: "FlySight")
         status.text = when {
             ready && main.mode != DeviceMode.UNKNOWN -> "Connected · ${main.mode.label} mode"
             ready -> "Connected"
@@ -266,6 +287,7 @@ class HomeScreen(main: MainActivity) : Screen(main) {
                 }
                 "ready" -> {
                     addButton(Ui.ButtonStyle.FILLED, "Get new jumps", R.drawable.ic_download) { getNewJumps() }
+                    addButton(Ui.ButtonStyle.OUTLINED, "Owner") { editOwner() }
                     addButton(Ui.ButtonStyle.OUTLINED, "Config") { main.selectTab(MainActivity.TAB_CONFIG) }
                     addDisconnect()
                 }
@@ -325,6 +347,7 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         val remote = main.sync.known
         shownRemote = remote
         val files = TrackStore.list(main)
+        val own = TrackStore.ownDevices(main)
         val byKey = remote.orEmpty().associateBy { it.key }
         val localKeys = files.map { it.nameWithoutExtension }.toSet()
         val recent = (files.map { Recent(TrackStore.sortKey(it), it, byKey[it.nameWithoutExtension]) } +
@@ -346,9 +369,10 @@ class HomeScreen(main: MainActivity) : Screen(main) {
                 val where = when {
                     remote == null -> null
                     session != null -> "On the phone and the FlySight"
-                    else -> "On the phone only"
+                    TrackStore.isSession(file) -> "On the phone only"
+                    else -> null
                 }
-                jumpItem(ui, file, TrackStore.title(file), where).onClick { TrackActivity.open(main, file) }
+                jumpItem(ui, file, TrackStore.title(file), where, TrackStore.who(file, own)).onClick { TrackActivity.open(main, file) }
             } else {
                 ui.ListItem(TrackStore.title(File(session!!.key + ".csv")), "On the FlySight only · Tap to download",
                     ui.avatar(R.drawable.ic_download)).onClick { openSession(session) }
@@ -401,10 +425,14 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         )
 
         /** A list item for a saved jump. The summary comes when the metadata is known. */
-        fun jumpItem(ui: Ui, file: File, headline: String, where: String? = null): Ui.ListItem {
+        /**
+         * A saved jump. [where] is an optional first line. [who] is the owner of the
+         * FlySight, or "Received" (see [TrackStore.who]).
+         */
+        fun jumpItem(ui: Ui, file: File, headline: String, where: String? = null, who: String? = null): Ui.ListItem {
             val item = ui.ListItem(headline, where ?: "…", ui.avatar(R.drawable.ic_jumps))
             TrackStore.loadMeta(file) { meta ->
-                val summary = meta?.summary() ?: "Cannot read this track"
+                val summary = listOfNotNull(who, meta?.summary() ?: "Cannot read this track").joinToString(" · ")
                 item.setSupporting(if (where != null) "$where\n$summary" else summary)
             }
             return item

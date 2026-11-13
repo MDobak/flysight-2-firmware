@@ -126,7 +126,8 @@ object KmlExport {
 
 /**
  * Gives other apps (Google Earth, or the share target) read access to the
- * exported files. The app gives access to one URI at a time.
+ * exported files: KML files and shared tracks. The app gives access to the
+ * URIs of one export at a time.
  */
 class ExportProvider : ContentProvider() {
 
@@ -146,7 +147,8 @@ class ExportProvider : ContentProvider() {
         return ParcelFileDescriptor.open(file(uri), ParcelFileDescriptor.MODE_READ_ONLY)
     }
 
-    override fun getType(uri: Uri) = KmlExport.MIME
+    override fun getType(uri: Uri) =
+        if (uri.lastPathSegment?.endsWith(".csv", ignoreCase = true) == true) JumpSharing.CSV_MIME else KmlExport.MIME
 
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
         val file = file(uri)

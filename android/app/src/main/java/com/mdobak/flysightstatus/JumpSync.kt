@@ -194,7 +194,10 @@ class JumpSync(private val main: MainActivity) {
                                 TrackStore.saveParsed(main, TrackStore.localName(path), data, track)
                             }
                             handler.post {
-                                file.onSuccess { saved += it }
+                                file.onSuccess {
+                                    saved += it
+                                    main.learnDeviceId(it)
+                                }
                                     .onFailure { main.log("Jumps: ${session.path} skipped: ${it.message}") }
                                 index++
                                 next()
