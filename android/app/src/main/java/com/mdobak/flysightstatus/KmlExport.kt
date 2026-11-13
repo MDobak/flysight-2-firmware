@@ -45,7 +45,7 @@ object KmlExport {
         lookAt(tracks)?.let { append(it) }
         for ((i, track) in tracks.withIndex()) {
             val color = abgr(Ui.TRACK_COLORS_DARK[i % Ui.TRACK_COLORS_DARK.size])
-            val first = if (track.hasExit) track.indexAt(-PRE_EXIT_S) else 0
+            val first = track.indexBeforeExit(PRE_EXIT_S)
             append("<Folder>\n<name>").append(escape(names.getOrElse(i) { track.name })).append("</name>\n<open>1</open>\n")
             append("<description>").append(escape(track.summary())).append("</description>\n")
 

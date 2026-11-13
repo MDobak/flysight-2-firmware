@@ -11,8 +11,9 @@ import kotlin.math.sqrt
 /**
  * One GNSS track from TRACK.CSV.
  *
- * Time [t] is in seconds from the exit. If the track has no exit, time is in
- * seconds from the first point. Speeds are in m/s. Heights are in m.
+ * Time [t] is in seconds from [zeroMs]. Normally this is the exit. If the
+ * track has no exit, it is the first point. A comparison of jumps can set a
+ * different time 0 (see [withZero]). Speeds are in m/s. Heights are in m.
  */
 class Track(
     val name: String,
@@ -24,6 +25,8 @@ class Track(
     val velN: DoubleArray,
     val velE: DoubleArray,
     val velD: DoubleArray,
+    /** UTC time of t = 0, ms since 1970, or null for the exit. */
+    zero: Long? = null,
 ) {
     val size get() = epochMs.size
 
@@ -34,7 +37,13 @@ class Track(
     val exitIndex: Int
 
     /** UTC time of the exit (or of the first point), ms since 1970. */
+    val exitMs: Long
+
+    /** UTC time of t = 0, ms since 1970. */
     val zeroMs: Long
+
+    /** The time of the exit (or of the first point), s. */
+    val exitTime get() = (exitMs - zeroMs) / 1000.0
 
     val t: DoubleArray
     val altitude = DoubleArray(size) { hMsl[it] - groundMsl }
@@ -47,7 +56,8 @@ class Track(
     init {
         val exit = findExit()
         exitIndex = exit?.first ?: -1
-        zeroMs = exit?.second ?: epochMs.first()
+        exitMs = exit?.second ?: epochMs.first()
+        zeroMs = zero ?: exitMs
         t = DoubleArray(size) { (epochMs[it] - zeroMs) / 1000.0 }
     }
 
@@ -94,6 +104,12 @@ class Track(
 
     val hasExit get() = exitIndex >= 0
 
+    /** The index of the point [seconds] before the exit, or 0 if there is no exit. */
+    fun indexBeforeExit(seconds: Double) = if (hasExit) indexAt(exitTime - seconds) else 0
+
+    /** The same track with t = 0 at [zeroMs] (UTC, ms since 1970). */
+    fun withZero(zeroMs: Long) = Track(name, epochMs, lat, lon, hMsl, velN, velE, velD, zeroMs)
+
     /**
      * Index of the canopy opening, or -1. After the exit, find the first point
      * where the vertical speed stays less than [DEPLOY_VEL_D] for
@@ -127,7 +143,7 @@ class Track(
     fun summary(): String = buildString {
         append("${startText()} UTC · ${formatDuration((epochMs.last() - epochMs.first()) / 1000.0)} · $size points\n")
         if (hasExit) {
-            append(String.format(java.util.Locale.US, "Exit: %s UTC at %.0f m above landing", TIME.format(Instant.ofEpochMilli(zeroMs)), altitude[exitIndex]))
+            append(String.format(java.util.Locale.US, "Exit: %s UTC at %.0f m above landing", TIME.format(Instant.ofEpochMilli(exitMs)), altitude[exitIndex]))
         } else {
             append("No exit found. Time is from the first point.")
         }

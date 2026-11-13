@@ -1,5 +1,6 @@
 package com.mdobak.flysightstatus
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
@@ -40,7 +41,12 @@ class TrackActivity : Activity() {
     private lateinit var snackbars: Ui.SnackbarHost
     private lateinit var playback: PlaybackBar
     private lateinit var replayButton: android.widget.ImageView
+    /** The tracks as loaded: the time of each is from its exit. */
+    private var loaded: List<Track> = emptyList()
+    /** The tracks that show: with the time of the synchronization. */
     private var tracks: List<Track> = emptyList()
+    private var sync = TrackSync.default(0)
+    private var syncChip: Ui.AssistChip? = null
     private var labels: List<String> = emptyList()
     /** The chips of the chart lines. They are hidden when only the map shows. */
     private var seriesRow: View? = null
@@ -179,7 +185,8 @@ class TrackActivity : Activity() {
 
     private fun showMore(anchor: View) {
         if (tracks.isEmpty()) return
-        ui.popupMenu(anchor, listOf(
+        ui.popupMenu(anchor, listOfNotNull(
+            if (tracks.size > 1) "Synchronize jumps" to { showSync() } else null,
             "Jump details" to { showDetails() },
             "Open in Google Earth" to { exportKml(googleEarth = true) },
             "Share as KML file" to { exportKml(googleEarth = false) },
@@ -189,7 +196,8 @@ class TrackActivity : Activity() {
     /** Write the KML file, then open it in Google Earth or in the share sheet. */
     private fun exportKml(googleEarth: Boolean) {
         val title = bar.title.text.toString()
-        val list = tracks
+        // The KML file has the time of each jump from its exit
+        val list = loaded
         val names = labels
         Thread {
             val result = runCatching { KmlExport.export(this, list, names, title) }
@@ -278,7 +286,9 @@ class TrackActivity : Activity() {
     }
 
     private fun show(list: List<Track>) {
-        tracks = list
+        loaded = list
+        sync = if (list.size > 1) TrackSync.decode(prefs.getString(syncKey(), null), list.size) else TrackSync.default(list.size)
+        tracks = if (sync.isDefault) list else sync.align(list)
         val sameDay = files.mapNotNull { TrackStore.dateOf(it) }.distinct().size <= 1
         labels = files.map { TrackStore.shortLabel(it, withDate = !sameDay) }
         chart.setTracks(list, labels)
@@ -287,6 +297,35 @@ class TrackActivity : Activity() {
         playback.setTracks(list)
         buildControls(labels)
         if (list.none { it.hasExit }) snackbars.show("No exit found. Time is from the first point.")
+    }
+
+    /** The preference key of the synchronization of these jumps. */
+    private fun syncKey() = "sync:" + files.joinToString("|") { it.path }
+
+    private fun showSync() {
+        if (loaded.size < 2) return
+        SyncDialog(ui, loaded, labels, loaded.indices.map { chart.trackColor(it) }, sync) { setSync(it) }.show()
+    }
+
+    /** Use a new synchronization. The views keep their position, the cursor and the replay time. */
+    private fun setSync(value: TrackSync) {
+        sync = value
+        if (value.isDefault) prefs.edit().remove(syncKey()).apply() else prefs.edit().putString(syncKey(), value.encode()).apply()
+        tracks = value.align(loaded)
+        chart.updateTimes(tracks)
+        map.updateTimes(tracks)
+        map.setCursor(chart.cursor)
+        pane3d.view.updateTimes(tracks)
+        playback.setTracks(tracks, keepTime = true)
+        updateSyncChip()
+    }
+
+    @SuppressLint("SetTextI18n") // English only
+    private fun updateSyncChip() {
+        val chip = syncChip ?: return
+        chip.text = "Sync: ${sync.mode.short}" + if (sync.hasOffsets) " · offsets" else ""
+        chip.active = !sync.isDefault
+        chip.contentDescription = "Synchronize jumps. Now: ${sync.mode.label}" + if (sync.hasOffsets) ", with offsets" else ""
     }
 
     private fun buildControls(labels: List<String>) {
@@ -301,8 +340,12 @@ class TrackActivity : Activity() {
         }
         seriesRow = ui.chipRow(*seriesChips.toTypedArray()).also { controls.addView(it) }
 
+        syncChip = null
         if (multi) {
-            val trackChips = labels.mapIndexed { i, label ->
+            val chip = ui.AssistChip("", R.drawable.ic_timer) { showSync() }
+            syncChip = chip
+            updateSyncChip()
+            val trackChips = listOf<View>(chip) + labels.mapIndexed { i, label ->
                 val dot = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(chart.trackColor(i))
@@ -323,8 +366,8 @@ class TrackActivity : Activity() {
     private fun showDetails() {
         if (tracks.isEmpty()) return
         val content = ui.column().apply { setPadding(ui.dp(24), 0, ui.dp(24), 0) }
-        for ((i, track) in tracks.withIndex()) {
-            if (tracks.size > 1) {
+        for ((i, track) in loaded.withIndex()) {
+            if (loaded.size > 1) {
                 content.addView(ui.text(Ui.Type.TITLE_SMALL, TrackStore.title(files[i]), chart.trackColor(i)).apply {
                     setPadding(0, if (i > 0) ui.dp(16) else 0, 0, ui.dp(4))
                 })

@@ -103,14 +103,19 @@ class PlaybackBar(context: Context, private val ui: Ui) : LinearLayout(context) 
         })
     }
 
-    /** Set the range of the replay: from 10 s before the first exit, to the last point. */
-    fun setTracks(list: List<Track>) {
-        stop()
+    /**
+     * Set the range of the replay: from 10 s before the first exit, to the last
+     * point. With [keepTime], the replay continues at the same time (for a new
+     * synchronization of the same tracks).
+     */
+    fun setTracks(list: List<Track>, keepTime: Boolean = false) {
+        if (!keepTime) stop()
         val exits = list.filter { it.hasExit }
-        start = if (exits.isEmpty()) list.minOf { it.t.first() } else max(list.minOf { it.t.first() }, -PRE_EXIT_S)
+        val first = list.minOf { it.t.first() }
+        start = if (exits.isEmpty()) first else max(first, exits.minOf { it.exitTime } - PRE_EXIT_S)
         end = list.maxOf { it.t.last() }
         if (end <= start) end = start + 1
-        setTime(if (exits.isEmpty()) start else 0.0, notify = false)
+        setTime(if (keepTime) time else exits.minOfOrNull { it.exitTime } ?: start, notify = false)
     }
 
     /** Show the bar and play from the start. */

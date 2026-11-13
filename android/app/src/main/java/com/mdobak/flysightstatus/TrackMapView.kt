@@ -105,6 +105,12 @@ class TrackMapView(context: Context) : View(context) {
         post { fitTracks() }
     }
 
+    /** Use the same tracks with different times. The view does not move. */
+    fun updateTimes(list: List<Track>) {
+        tracks = list
+        invalidate()
+    }
+
     fun setTrackVisible(index: Int, on: Boolean) {
         if (on) hidden -= index else hidden += index
         invalidate()

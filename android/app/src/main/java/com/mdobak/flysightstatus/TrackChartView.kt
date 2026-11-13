@@ -22,7 +22,7 @@ import kotlin.math.min
 import kotlin.math.pow
 
 /**
- * Line chart of one or more tracks against time from the exit.
+ * Line chart of one or more tracks against time (normally from the exit).
  *
  * With one track, each series has its own colour. With more tracks, each
  * track has its own colour and each series has its own line style.
@@ -119,7 +119,28 @@ class TrackChartView(context: Context, private val ui: Ui) : View(context) {
         fullMax = list.maxOf { it.t.last() }
         if (fullMax <= fullMin) fullMax = fullMin + 1
         resetZoom()
-        cursor = if (list.any { it.hasExit }) 0.0 else fullMin
+        cursor = list.filter { it.hasExit }.minOfOrNull { it.exitTime } ?: fullMin
+    }
+
+    /**
+     * Use the same tracks with different times (a new synchronization). The
+     * hidden tracks, the cursor and the zoom stay. A chart that shows all
+     * of the time shows all of the new time.
+     */
+    fun updateTimes(list: List<Track>) {
+        val all = xMin <= fullMin && xMax >= fullMax
+        val span = xMax - xMin
+        tracks = list
+        fullMin = list.minOf { it.t.first() }
+        fullMax = list.maxOf { it.t.last() }
+        if (fullMax <= fullMin) fullMax = fullMin + 1
+        if (all || span >= fullMax - fullMin) {
+            resetZoom()
+        } else {
+            xMin = xMin.coerceIn(fullMin, fullMax - span)
+            xMax = xMin + span
+            invalidate()
+        }
     }
 
     /** Move the cursor to [time] (s). If the cursor is not in the visible range, move the range. */

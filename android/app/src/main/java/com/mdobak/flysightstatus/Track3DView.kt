@@ -356,6 +356,14 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
         if (isShown) load()
     }
 
+    /** Use the same tracks with different times. The scene and the view stay. */
+    fun updateTimes(list: List<Track>) {
+        tracks = list
+        scene?.paths?.forEach { it.track = list[it.index] }
+        cursorTime?.let { setCursor(it) }
+        requestRender()
+    }
+
     fun setTrackVisible(index: Int, on: Boolean) {
         hidden = if (on) hidden - index else hidden + index
         requestRender()
@@ -1007,7 +1015,8 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
     /** A track path in scene coordinates (m), from 10 s before the exit. */
     private class TrackPath(
         val index: Int,
-        val track: Track,
+        /** The track. A new synchronization changes it to the same track with different times. */
+        @Volatile var track: Track,
         val first: Int,
         val count: Int,
         val xyz: FloatArray,
@@ -1091,7 +1100,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
 
             fun build(context: Context, tracks: List<Track>): Scene {
                 // The parts of the tracks to show
-                val firsts = tracks.map { if (it.hasExit) it.indexAt(-PRE_EXIT_S) else 0 }
+                val firsts = tracks.map { it.indexBeforeExit(PRE_EXIT_S) }
                 var minX = Double.MAX_VALUE
                 var maxX = -Double.MAX_VALUE
                 var minY = Double.MAX_VALUE
