@@ -79,6 +79,7 @@ FROM --platform=$BUILDPLATFORM golang:1.27-trixie AS server
 WORKDIR /src
 COPY web/go.mod ./
 COPY web/*.go web/index.html ./
+COPY web/screenshots/*.webp ./screenshots/
 ARG TARGETOS TARGETARCH VERSION=unknown
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.buildVersion=$VERSION" -o /out/flysight-web .

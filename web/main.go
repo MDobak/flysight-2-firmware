@@ -28,7 +28,7 @@ import (
 	"time"
 )
 
-//go:embed index.html
+//go:embed index.html screenshots/*.webp
 var files embed.FS
 
 var page = template.Must(template.ParseFS(files, "index.html"))
@@ -153,6 +153,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /sample.wav", s.sample)
 	mux.HandleFunc("GET /flysight.apk", s.app)
 	mux.HandleFunc("GET /sample-jump.zip", s.jump)
+	mux.HandleFunc("GET /screenshots/{name}", screenshot)
 	mux.HandleFunc("/", notFound) // all other paths and methods
 	return mux
 }
@@ -261,6 +262,19 @@ func (s *server) voice(r *http.Request) (voice, bool) {
 // notFound sends the browser to the home page. The website has no 404 page.
 func notFound(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// screenshot gives a screenshot of the Android app.
+func screenshot(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	data, err := files.ReadFile("screenshots/" + name)
+	if err != nil || !strings.HasSuffix(name, ".webp") {
+		notFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/webp")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(data)
 }
 
 // audio gives the ZIP file of a voice.

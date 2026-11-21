@@ -19,6 +19,7 @@ Audio/original/*.WAV
 !web/go.mod
 !web/*.go
 !web/index.html
+!web/screenshots/*.webp
 !android/
 android/local.properties
 android/.gradle/

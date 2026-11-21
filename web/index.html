@@ -29,7 +29,8 @@
     background: var(--card); border: 1px solid var(--line); border-radius: 12px;
     padding: 1.25rem 1.25rem 1.4rem; margin-bottom: 1.25rem;
   }
-  ol { margin: 0 0 1rem; padding-left: 1.4rem; }
+  ol, ul { margin: 0 0 1rem; padding-left: 1.4rem; }
+  .features { margin: 0; }
   li { margin: .3rem 0; }
   li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
   code { font: .9em ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -69,6 +70,26 @@
   }
   .play:focus-visible, .voice input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .play[aria-pressed=true] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .shots { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; margin: 1.25rem 0 0; }
+  @media (max-width: 30rem) { .shots { grid-template-columns: repeat(2, 1fr); } }
+  .shots figure { margin: 0; }
+  .shots a { display: block; border-radius: 10px; cursor: zoom-in; }
+  .shots img {
+    display: block; width: 100%; height: auto; border-radius: 10px;
+    border: 1px solid var(--line); background: #0e0f13;
+  }
+  .shots figcaption { color: var(--muted); font-size: .8rem; line-height: 1.3; margin-top: .4rem; }
+  .viewer {
+    padding: 0; border: 0; background: transparent; max-width: 100vw; max-height: 100vh;
+    overflow: visible; cursor: zoom-out;
+  }
+  .viewer::backdrop { background: rgb(0 0 0 / .85); }
+  .viewer img { display: block; height: auto; max-height: 92vh; width: auto; max-width: 94vw; border-radius: 14px; }
+  .viewer .close {
+    position: fixed; top: .75rem; right: .75rem; width: 2.75rem; height: 2.75rem; border-radius: 999px;
+    border: 0; background: rgb(255 255 255 / .15); color: #fff; font-size: 1.5rem; line-height: 1; cursor: pointer;
+  }
+  .shots a:focus-visible, .viewer .close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>
 </head>
 <body>
@@ -78,6 +99,46 @@
     The source code is on <a href="https://github.com/MDobak/flysight-2-firmware">GitHub</a>.</p>
 
   {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+
+  <section>
+    <h2>Features</h2>
+    <ul class="features">
+      <li><strong>Barometer altitude.</strong> You can use the barometer instead of the GPS for the altitude of alarms, windows and altitude calls.</li>
+      <li><strong>Control the FlySight from the phone.</strong> Connect over Bluetooth, start and stop a recording, and edit the configuration.</li>
+      <li><strong>Get your jumps.</strong> Download new jumps over Bluetooth.</li>
+      <li><strong>Firmware update over Bluetooth.</strong></li>
+      <li><strong>Track viewer.</strong> A chart, a map and a 3D view, with a replay.</li>
+      <li><strong>Compare jumps.</strong> Show two or more jumps together, synchronized by exit or GPS time.</li>
+      <li><strong>Share jumps.</strong> Send jumps to other skydivers and receive their jumps.</li>
+      <li><strong>Record with the phone.</strong> Record a jump with the phone GPS when you have no FlySight.</li>
+      <li><strong>Small improvements.</strong> A smooth tone with no clicks, a slope tone with less noise, and more reliable file transfer.</li>
+    </ul>
+    <div class="shots">
+      <figure>
+        <a href="/screenshots/home.webp"><img src="/screenshots/home-small.webp" width="300" height="669" loading="lazy"
+          alt="The home screen of the app, with a connected FlySight and the recent jumps"></a>
+        <figcaption>The home screen</figcaption>
+      </figure>
+      <figure>
+        <a href="/screenshots/track.webp"><img src="/screenshots/track-small.webp" width="300" height="669" loading="lazy"
+          alt="A BASE jump from the Eiger: a chart of the speeds and the altitude, and the 3D view of the flight"></a>
+        <figcaption>A jump in 3D</figcaption>
+      </figure>
+      <figure>
+        <a href="/screenshots/compare.webp"><img src="/screenshots/compare-small.webp" width="300" height="669" loading="lazy"
+          alt="Two BASE jumps from the same exit, compared on a chart and in the 3D view"></a>
+        <figcaption>Compare jumps</figcaption>
+      </figure>
+      <figure>
+        <a href="/screenshots/config.webp"><img src="/screenshots/config-small.webp" width="300" height="669" loading="lazy"
+          alt="The configuration editor, with the choice of the GPS or the barometer for the altitude"></a>
+        <figcaption>The configuration</figcaption>
+      </figure>
+    </div>
+    <p class="muted">The tracks are BASE jumps from the Eiger, Switzerland
+      (<a href="https://github.com/platypii/BASElineXR">BASElineXR</a>), and from the Wasatch Range, Utah
+      (<a href="https://github.com/hartmandrector/polar">hartmandrector</a>).</p>
+  </section>
 
   <section>
     <h2>Firmware</h2>
@@ -161,7 +222,25 @@
       <a href="https://flysight.ca/firmware/">FlySight firmware page</a>. Use them to go back to the official firmware.</p>
   </section>
 </main>
+<dialog class="viewer" aria-label="Screenshot">
+  <img alt="">
+  <button class="close" type="button" aria-label="Close">×</button>
+</dialog>
 <script>
+  // The screenshots open large. A push on the large image, the close button or Escape closes it.
+  const viewer = document.querySelector(".viewer");
+  const large = viewer.querySelector("img");
+  for (const a of document.querySelectorAll(".shots a")) {
+    a.addEventListener("click", e => {
+      e.preventDefault();
+      large.src = a.href;
+      large.alt = a.querySelector("img").alt;
+      viewer.showModal();
+    });
+  }
+  viewer.addEventListener("click", () => viewer.close());
+  viewer.addEventListener("close", () => large.removeAttribute("src"));
+
   // The sample buttons. One sample plays at a time. A second push stops it.
   const player = new Audio();
   let playing = null;
