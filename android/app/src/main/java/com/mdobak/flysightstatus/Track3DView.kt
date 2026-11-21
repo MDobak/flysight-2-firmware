@@ -54,10 +54,10 @@ import kotlin.math.tan
 
 /** The image on the terrain of the 3D view. */
 enum class MapStyle(val label: String, val description: String, val credit: String, val hasImage: Boolean = true) {
-    SATELLITE("Satellite", "Sentinel-2 cloudless images, 10 m per pixel", "Sentinel-2 cloudless 2025 by EOX · Terrain Tiles"),
-    STREETS("Streets", "OpenStreetMap", "© OpenStreetMap contributors · Terrain Tiles"),
-    TOPO("Topographic", "OpenTopoMap, with contour lines", "© OpenStreetMap contributors, SRTM · OpenTopoMap · Terrain Tiles"),
-    ELEVATION("Elevation", "Colours by height, with contour lines", "Terrain Tiles", hasImage = false),
+    SATELLITE("Satellite", "Sentinel-2 cloudless images, 10 m per pixel", "Sentinel-2 cloudless 2025 by EOX · Mapterhorn"),
+    STREETS("Streets", "OpenStreetMap", "© OpenStreetMap contributors · Mapterhorn"),
+    TOPO("Topographic", "OpenTopoMap, with contour lines", "© OpenStreetMap contributors, SRTM · OpenTopoMap · Mapterhorn"),
+    ELEVATION("Elevation", "Colours by height, with contour lines", "Mapterhorn", hasImage = false),
 }
 
 /**
@@ -81,6 +81,7 @@ class Track3DPane(context: Context, private val ui: Ui) : FrameLayout(context) {
     init {
         view.style = MapStyle.entries.getOrElse(prefs.getInt(PREF_STYLE, 0)) { MapStyle.SATELLITE }
         view.heightScale = prefs.getFloat(PREF_SCALE, 1f).takeIf { it in SCALES } ?: 1f
+        view.cutTerrain = prefs.getBoolean(PREF_CUT, false)
         addView(view, LayoutParams(MATCH, MATCH))
 
         val compassButton = ui.mapButton(R.drawable.ic_fit, "Turn to north") { view.northUp() }.apply {
@@ -182,7 +183,53 @@ class Track3DPane(context: Context, private val ui: Ui) : FrameLayout(context) {
         content.addView(ui.note("A larger scale makes the terrain and the jump higher than they are. Use it to see flat terrain. " +
             "At 0×, the terrain is flat at the landing height, and the jump has its true height.")
             .apply { setPadding(ui.dp(24), ui.dp(4), ui.dp(24), 0) })
-        ui.dialog("3D view", content = content, positive = Ui.DialogButton("Close"), negative = null, scrollContent = true).show()
+
+        val box = ui.icon(R.drawable.ic_checkbox_off)
+        fun showCut() {
+            val on = view.cutTerrain
+            box.setImageResource(if (on) R.drawable.ic_checkbox_on else R.drawable.ic_checkbox_off)
+            box.imageTintList = android.content.res.ColorStateList.valueOf(if (on) ui.primary else ui.onSurfaceVariant)
+        }
+        content.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ui.dp(56)
+            setPadding(ui.dp(24), ui.dp(12), ui.dp(24), ui.dp(4))
+            background = ui.ripple(ui.onSurface, null)
+            addView(box, LinearLayout.LayoutParams(ui.dp(24), ui.dp(24)).apply { marginEnd = ui.dp(16) })
+            addView(ui.column().apply {
+                addView(ui.text(Ui.Type.BODY_LARGE, "Cut the terrain under the jumps"))
+                addView(ui.text(Ui.Type.BODY_SMALL, "The terrain data does not show narrow valleys. " +
+                    "Where a jump goes under the terrain, the view lowers the terrain below the jump.", ui.onSurfaceVariant))
+            }, LinearLayout.LayoutParams(0, WRAP, 1f))
+            setOnClickListener {
+                view.cutTerrain = !view.cutTerrain
+                prefs.edit().putBoolean(PREF_CUT, view.cutTerrain).apply()
+                showCut()
+            }
+        })
+        showCut()
+
+        lateinit var dialog: android.app.Dialog
+        content.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ui.dp(56)
+            setPadding(ui.dp(24), ui.dp(4), ui.dp(24), ui.dp(4))
+            background = ui.ripple(ui.onSurface, null)
+            addView(ui.icon(R.drawable.ic_refresh), LinearLayout.LayoutParams(ui.dp(24), ui.dp(24)).apply { marginEnd = ui.dp(16) })
+            addView(ui.column().apply {
+                addView(ui.text(Ui.Type.BODY_LARGE, "Clear the map cache of this jump"))
+                addView(ui.text(Ui.Type.BODY_SMALL, "The app deletes the saved map and terrain of this area, " +
+                    "and downloads them again.", ui.onSurfaceVariant))
+            }, LinearLayout.LayoutParams(0, WRAP, 1f))
+            setOnClickListener {
+                dialog.dismiss()
+                view.clearCache()
+            }
+        })
+        dialog = ui.dialog("3D view", content = content, positive = Ui.DialogButton("Close"), negative = null, scrollContent = true)
+        dialog.show()
     }
 
     private fun heading(text: String) = ui.text(Ui.Type.TITLE_SMALL, text, ui.primary).apply {
@@ -239,14 +286,18 @@ class Track3DPane(context: Context, private val ui: Ui) : FrameLayout(context) {
         private const val PREFS = "track_viewer"
         private const val PREF_STYLE = "map_3d_style"
         private const val PREF_SCALE = "map_3d_scale"
+        private const val PREF_CUT = "map_3d_cut"
         private val SCALES = listOf(0f, 1f, 2f, 3f)
         private const val CREDITS =
             "Satellite: Sentinel-2 cloudless 2025, https://cloudless.eox.at, by EOX IT Services GmbH " +
                 "(contains modified Copernicus Sentinel data 2025), CC BY-NC-SA 4.0.\n\n" +
                 "Streets: © OpenStreetMap contributors, ODbL, https://www.openstreetmap.org/copyright.\n\n" +
                 "Topographic: map data © OpenStreetMap contributors, SRTM. Map style © OpenTopoMap, CC BY-SA.\n\n" +
-                "Terrain: Terrain Tiles on AWS Open Data, by Mapzen and others, from SRTM, 3DEP, " +
-                "ETOPO1, GMTED and other sources.\n\n" +
+                "Terrain: Mapterhorn, https://mapterhorn.com. Copernicus GLO-30: © DLR e.V. 2010-2014 and " +
+                "© Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA. " +
+                "Other sources: https://mapterhorn.com/attribution.\n\n" +
+                "Terrain where Mapterhorn has no data: Terrain Tiles on AWS Open Data, by Mapzen and others, " +
+                "from SRTM, 3DEP, ETOPO1, GMTED and other sources.\n\n" +
                 "The 3D view shows each track from 10 s before the exit. The terrain data and the GPS heights " +
                 "have errors. Where the terrain hides a part of a track, that part shows as a faint line."
     }
@@ -255,8 +306,8 @@ class Track3DPane(context: Context, private val ui: Ui) : FrameLayout(context) {
 /**
  * 3D view of the tracks over the terrain.
  *
- * The view loads the tiles when it becomes visible, and keeps them in the cache
- * folder of the app. The gestures are as in Google Earth: one finger moves the
+ * The view loads the tiles when it becomes visible, and keeps them in
+ * [TileCache]. The gestures are as in Google Earth: one finger moves the
  * map, two fingers zoom and turn it, and two fingers up or down tilt it. A
  * double tap zooms in. A tap with two fingers zooms out. A double tap and a
  * drag up or down zooms with one finger.
@@ -304,6 +355,14 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             loadImage()
         }
 
+    /** If true, the terrain goes down below the parts of the tracks that are under it (see [Scene.build]). */
+    var cutTerrain = false
+        set(value) {
+            if (value == field) return
+            field = value
+            if (scene != null || loading) load()
+        }
+
     /**
      * If true, the camera follows the cursor (during the replay). The gestures
      * then change: one finger turns and tilts the view around the cursor. Two
@@ -335,6 +394,8 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
     private var loading = false
     private var fitted = false
     private var imageJob = 0
+    /** Increases when the scene must load again (see [load]). */
+    private var generation = 0
 
     private val camera = Camera()
     private val renderer = Renderer()
@@ -459,14 +520,16 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
         onStatus?.invoke("Loading the terrain…")
         val list = tracks
         val style = style
+        val cut = cutTerrain
+        val gen = generation
         Thread {
-            val result = runCatching { Scene.build(context, list) }
+            val result = runCatching { Scene.build(context, list, cut) }
             val image = result.getOrNull()?.let { s ->
                 if (style.hasImage) runCatching { Scene.loadImage(context, style, s) }.getOrNull() else null
             }
             post {
                 loading = false
-                if (list !== tracks) {
+                if (list !== tracks || cut != cutTerrain || gen != generation) {
                     load()
                     return@post
                 }
@@ -479,6 +542,22 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
                     }
                     if (this.style == style) setImage(style, image) else loadImage()
                 }.onFailure { onStatus?.invoke("Cannot show the 3D view: ${it.message}") }
+            }
+        }.start()
+    }
+
+    /**
+     * Delete the stored map and terrain tiles of the area of the view, then
+     * download them again.
+     */
+    fun clearCache() {
+        val s = scene ?: return
+        onStatus?.invoke("Loading the terrain…")
+        Thread {
+            runCatching { TileCache.deleteArea(context, s.x0, s.y0, s.x0 + s.side, s.y0 + s.side) }
+            post {
+                generation++
+                load()
             }
         }.start()
     }
@@ -1091,14 +1170,24 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             const val GRID = 257
             private const val MAX_IMAGE = 4096
             private const val MAX_TERRAIN_ZOOM = 15
+            /** Mapterhorn has all the world to this zoom. */
+            private const val MAPTERHORN_GLOBAL_ZOOM = 12
+            /** The cut terrain is this distance below the track (m). */
+            private const val CUT_CLEARANCE = 3.0
+            /** The sides of the cut go up 2.5 m for each metre to the side (68°). */
+            private const val CUT_SLOPE = 2.5
+            /** The cut is not wider than this on each side of the track (m). */
+            private const val CUT_MAX_M = 400.0
             private const val EARTH = 40075016.686
             const val PRE_EXIT_S = 10.0
-            private const val CACHE_MAX_AGE_MS = 30L * 24 * 3600 * 1000
-            private const val USER_AGENT = "FlySight-mdobak/1.0 (Android; private app for FlySight 2)"
 
             private val tileLoader = Executors.newFixedThreadPool(4)
 
-            fun build(context: Context, tracks: List<Track>): Scene {
+            /**
+             * Make the scene. If [cut], the terrain goes down below the tracks where they are under it:
+             * the terrain data does not show narrow valleys.
+             */
+            fun build(context: Context, tracks: List<Track>, cut: Boolean): Scene {
                 // The parts of the tracks to show
                 val firsts = tracks.map { it.indexBeforeExit(PRE_EXIT_S) }
                 var minX = Double.MAX_VALUE
@@ -1131,6 +1220,11 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
                     val wx = x0 + side * i / (GRID - 1)
                     val wy = y0 + side * j / (GRID - 1)
                     heights[j * GRID + i] = elevation?.at(wx, wy) ?: landing
+                }
+                if (cut && elevation != null) {
+                    for ((n, track) in tracks.withIndex()) {
+                        cutUnder(heights, track, firsts[n], x0, y0, side, side / (GRID - 1) * metersPerUnit)
+                    }
                 }
                 val step = (side / (GRID - 1) * metersPerUnit).toFloat()
                 val base = min(heights.min(), landing)
@@ -1180,14 +1274,48 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
                 return scene
             }
 
-            /** Heights from Terrarium tiles: (R × 256 + G + B / 256) − 32768 m. */
-            private class Elevation(val zoom: Int, val tx0: Int, val ty0: Int, val cols: Int, val rows: Int, val data: FloatArray) {
+            /**
+             * Lower the terrain below [track]: at each point, the terrain is at most
+             * [CUT_CLEARANCE] m below the point, 1.5 cells to each side. Then it goes up
+             * with the slope [CUT_SLOPE]. Terrain that is already lower does not change.
+             * [cell] is the distance between two grid points (m).
+             */
+            private fun cutUnder(heights: FloatArray, track: Track, first: Int, x0: Double, y0: Double, side: Double, cell: Double) {
+                val top = heights.max()
+                val last = GRID - 1
+                for (k in first until track.size) {
+                    val fi = (lonToX(track.lon[k]) - x0) / side * last
+                    val fj = (latToY(track.lat[k]) - y0) / side * last
+                    val bottom = track.hMsl[k] - CUT_CLEARANCE
+                    // Cells that are farther than this are not higher than the cut
+                    val reach = min((top - bottom) / CUT_SLOPE, CUT_MAX_M) / cell
+                    if (reach <= 0) continue
+                    val i0 = max(0, ceil(fi - reach).toInt())
+                    val i1 = min(last, floor(fi + reach).toInt())
+                    val j0 = max(0, ceil(fj - reach).toInt())
+                    val j1 = min(last, floor(fj + reach).toInt())
+                    for (j in j0..j1) for (i in i0..i1) {
+                        // The floor is flat to 1.5 cells, so the mesh under the point is not higher than the floor
+                        val limit = (bottom + CUT_SLOPE * max(0.0, hypot(i - fi, j - fj) - 1.5) * cell).toFloat()
+                        val g = j * GRID + i
+                        if (heights[g] > limit) heights[g] = limit
+                    }
+                }
+            }
+
+            /**
+             * Heights from Terrarium tiles: (R × 256 + G + B / 256) − 32768 m. A tile
+             * has [ts] × [ts] pixels.
+             */
+            private class Elevation(
+                val zoom: Int, val ts: Int, val tx0: Int, val ty0: Int, val cols: Int, val rows: Int, val data: FloatArray,
+            ) {
                 fun at(wx: Double, wy: Double): Float {
                     val scale = 2.0.pow(zoom)
-                    val px = (wx / 256 * scale - tx0) * 256 - 0.5
-                    val py = (wy / 256 * scale - ty0) * 256 - 0.5
-                    val w = cols * 256
-                    val h = rows * 256
+                    val px = (wx / 256 * scale - tx0) * ts - 0.5
+                    val py = (wy / 256 * scale - ty0) * ts - 0.5
+                    val w = cols * ts
+                    val h = rows * ts
                     val i = floor(px).toInt().coerceIn(0, w - 2)
                     val j = floor(py).toInt().coerceIn(0, h - 2)
                     val ax = (px - i).toFloat().coerceIn(0f, 1f)
@@ -1199,36 +1327,68 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
                 }
             }
 
+            /**
+             * The terrain of the area. The first source is Mapterhorn (512 px WebP tiles).
+             * It has all the world to zoom 12, and lidar data at higher zooms in some
+             * countries. If Mapterhorn has no data, the backup is Terrain Tiles on AWS.
+             */
             private fun loadElevation(context: Context, x0: Double, y0: Double, side: Double): Elevation {
-                // Not more than 4 tiles across the area
+                // Not more than 4 tiles of 256 px across the area
                 var zoom = MAX_TERRAIN_ZOOM
                 while (zoom > 1 && side * 2.0.pow(zoom) / 256 > 4) zoom--
+                // A 512 px tile at zoom z - 1 has the same pixel size as a 256 px tile at zoom z
+                val mapterhorn = (zoom - 1).coerceAtLeast(0)
+                val tries = listOfNotNull(
+                    Triple(mapterhorn, 512, "mapterhorn"),
+                    if (mapterhorn > MAPTERHORN_GLOBAL_ZOOM) Triple(MAPTERHORN_GLOBAL_ZOOM, 512, "mapterhorn") else null,
+                    Triple(zoom, 256, "terrain"),
+                )
+                var error: Exception? = null
+                for ((z, ts, source) in tries) {
+                    try {
+                        return loadElevation(context, x0, y0, side, z, ts) { x, y ->
+                            if (source == "mapterhorn") "mapterhorn/$z/$x/$y.webp" to "https://tiles.mapterhorn.com/$z/$x/$y.webp"
+                            else "terrain/$z/$x/$y.png" to "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/$z/$x/$y.png"
+                        }
+                    } catch (e: Exception) {
+                        error = e
+                    }
+                }
+                throw error ?: IllegalStateException("No terrain data")
+            }
+
+            /** The terrain of the area from the tiles at [zoom]. [tile] gives the cache name and the URL of a tile. */
+            private fun loadElevation(
+                context: Context, x0: Double, y0: Double, side: Double, zoom: Int, ts: Int,
+                tile: (Int, Int) -> Pair<String, String>,
+            ): Elevation {
                 val scale = 2.0.pow(zoom) / 256
                 val tx0 = floor(x0 * scale).toInt()
                 val ty0 = floor(y0 * scale).toInt()
                 val cols = floor((x0 + side) * scale).toInt() - tx0 + 1
                 val rows = floor((y0 + side) * scale).toInt() - ty0 + 1
-                val w = cols * 256
-                val data = FloatArray(w * rows * 256)
+                val w = cols * ts
+                val data = FloatArray(w * rows * ts)
                 val tasks = (0 until rows).flatMap { r -> (0 until cols).map { c -> r to c } }.map { (r, c) ->
                     Callable {
                         val n = 1 shl zoom
                         val x = Math.floorMod(tx0 + c, n)
                         val y = ty0 + r
-                        val bitmap = fetch(context, "terrain/$zoom/$x/$y.png",
-                            "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/$zoom/$x/$y.png")
-                            ?: throw IllegalStateException("No terrain tile $zoom/$x/$y")
-                        val pixels = IntArray(256 * 256)
-                        bitmap.getPixels(pixels, 0, 256, 0, 0, 256, 256)
-                        for (py in 0 until 256) for (px in 0 until 256) {
-                            val p = pixels[py * 256 + px]
+                        val (name, url) = tile(x, y)
+                        val bitmap = fetch(context, name, url)
+                            ?.takeIf { it.width == ts && it.height == ts }
+                            ?: throw IllegalStateException("No terrain tile $name")
+                        val pixels = IntArray(ts * ts)
+                        bitmap.getPixels(pixels, 0, ts, 0, 0, ts, ts)
+                        for (py in 0 until ts) for (px in 0 until ts) {
+                            val p = pixels[py * ts + px]
                             val v = (Color.red(p) * 256 + Color.green(p) + Color.blue(p) / 256f) - 32768f
-                            data[(r * 256 + py) * w + c * 256 + px] = v
+                            data[(r * ts + py) * w + c * ts + px] = v
                         }
                     }
                 }
                 tileLoader.invokeAll(tasks).forEach { it.get() }
-                return Elevation(zoom, tx0, ty0, cols, rows, data)
+                return Elevation(zoom, ts, tx0, ty0, cols, rows, data)
             }
 
             /** The tile source of a style. */
@@ -1237,8 +1397,8 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
             private fun source(style: MapStyle): Source? = when (style) {
                 MapStyle.SATELLITE -> Source(15, { z, x, y -> "s2cloudless/$z/$x/$y.jpg" },
                     { z, x, y -> "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/GoogleMapsCompatible/$z/$y/$x.jpg" })
-                // The same cache as the 2D map
-                MapStyle.STREETS -> Source(16, { z, x, y -> "tiles/$z/$x/$y.png" }, { z, x, y -> "https://tile.openstreetmap.org/$z/$x/$y.png" })
+                // The same tiles as the 2D map
+                MapStyle.STREETS -> Source(16, { z, x, y -> "osm/$z/$x/$y.png" }, { z, x, y -> "https://tile.openstreetmap.org/$z/$x/$y.png" })
                 MapStyle.TOPO -> Source(16, { z, x, y -> "opentopomap/$z/$x/$y.png" }, { z, x, y -> "https://tile.opentopomap.org/$z/$x/$y.png" })
                 MapStyle.ELEVATION -> null
             }
@@ -1280,30 +1440,7 @@ class Track3DView(context: Context) : GLSurfaceView(context) {
                 return image
             }
 
-            /** A tile from the cache, or from the network. An old tile is better than no tile. */
-            private fun fetch(context: Context, cacheName: String, url: String): Bitmap? {
-                val file = File(context.cacheDir, cacheName)
-                if (file.exists() && System.currentTimeMillis() - file.lastModified() < CACHE_MAX_AGE_MS) {
-                    BitmapFactory.decodeFile(file.path)?.let { return it }
-                }
-                fun old() = if (file.exists()) BitmapFactory.decodeFile(file.path) else null
-                val connection = URL(url).openConnection() as HttpURLConnection
-                connection.setRequestProperty("User-Agent", USER_AGENT)
-                connection.connectTimeout = 10_000
-                connection.readTimeout = 15_000
-                try {
-                    if (connection.responseCode != 200) return old()
-                    val bytes = connection.inputStream.use { it.readBytes() }
-                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return old()
-                    file.parentFile?.mkdirs()
-                    file.writeBytes(bytes)
-                    return bitmap
-                } catch (_: Exception) {
-                    return old()
-                } finally {
-                    connection.disconnect()
-                }
-            }
+            private fun fetch(context: Context, cacheName: String, url: String): Bitmap? = TileCache.bitmap(context, cacheName, url)
 
             private fun lonToX(lon: Double) = (lon + 180.0) / 360.0 * 256
 

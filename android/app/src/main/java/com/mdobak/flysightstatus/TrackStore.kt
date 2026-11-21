@@ -23,6 +23,11 @@ data class JumpMeta(
     val freefallS: Double?,
     val maxVKmh: Double,
     val maxHKmh: Double,
+    /** The area of the track (degrees), or null if it is not known. */
+    val minLat: Double? = null,
+    val maxLat: Double? = null,
+    val minLon: Double? = null,
+    val maxLon: Double? = null,
 ) {
     /** "Exit 4 000 m · Freefall 1:02 · 190 km/h", or a short text if there is no exit. */
     fun summary(): String {
@@ -52,6 +57,10 @@ data class JumpMeta(
                 freefallS = if (track.hasExit && track.deployIndex > 0) track.t[track.deployIndex] else null,
                 maxVKmh = maxV,
                 maxHKmh = maxH,
+                minLat = track.lat.minOrNull(),
+                maxLat = track.lat.maxOrNull(),
+                minLon = track.lon.minOrNull(),
+                maxLon = track.lon.maxOrNull(),
             )
         }
     }
@@ -99,7 +108,7 @@ object TrackStore {
     private val SESSION = Regex("""/?(\d\d-\d\d-\d\d)/(\d\d-\d\d-\d\d)/TRACK\.CSV""", RegexOption.IGNORE_CASE)
     private val TEMP = Regex("""/?TEMP/(\d{4})/TRACK\.CSV""", RegexOption.IGNORE_CASE)
     private val LOCAL_SESSION = Regex("""(\d\d)-(\d\d)-(\d\d)_(\d\d)-(\d\d)-(\d\d)""")
-    private const val META_VERSION = "3"
+    private const val META_VERSION = "4"
     private const val OWNERS_V2 = "#v2"
     /** The header is near the start of the file. */
     private const val HEADER_BYTES = 32 * 1024
@@ -112,6 +121,8 @@ object TrackStore {
     private var names: SharedPreferences? = null
     private var trackOwners: SharedPreferences? = null
     private var deviceOwners: SharedPreferences? = null
+    /** filesDir and cacheDir of the app, for [TileCache.scheduleClean]. */
+    private var appDirs: Pair<File, File>? = null
 
     /** The device ID of this phone in its recordings ([PhoneRecorder]). Each install has a new random ID. */
     var phoneDeviceId = ""
@@ -121,6 +132,7 @@ object TrackStore {
     fun init(context: Context) {
         if (names != null) return
         val app = context.applicationContext
+        appDirs = app.filesDir to app.cacheDir
         names = app.getSharedPreferences("track_names", Context.MODE_PRIVATE)
         trackOwners = app.getSharedPreferences("track_owners", Context.MODE_PRIVATE)
         val devices = app.getSharedPreferences("device_owners", Context.MODE_PRIVATE)
@@ -134,13 +146,17 @@ object TrackStore {
             if (devices.all.size > 0) for (f in list(app)) addDefaultOwner(f)
             devices.edit().putBoolean(OWNERS_V2, true).apply()
         }
+        TileCache.scheduleClean(app)
     }
 
     fun dir(context: Context) = File(context.filesDir, "tracks").apply { mkdirs() }
 
     /** All saved tracks, the newest first. */
-    fun list(context: Context): List<File> =
-        dir(context).listFiles { f -> f.isFile && f.name.endsWith(".csv") }
+    fun list(context: Context): List<File> = list(dir(context))
+
+    /** All tracks in [dir], the newest first. */
+    fun list(dir: File): List<File> =
+        dir.listFiles { f -> f.isFile && f.name.endsWith(".csv") }
             ?.sortedWith(compareByDescending<File> { sortKey(it) }) ?: emptyList()
 
     /**
@@ -250,6 +266,7 @@ object TrackStore {
         headerCache.remove(file.path)
         names?.edit()?.remove(file.name)?.apply()
         trackOwners?.edit()?.remove(file.name)?.apply()
+        appDirs?.let { TileCache.scheduleClean(it.first, it.second) }
     }
 
     /** The name of the jump: the name from the user, or "7 Nov 2026, 14:10". */
@@ -429,6 +446,10 @@ object TrackStore {
                 freefallS = p.getProperty("freefall")?.toDoubleOrNull(),
                 maxVKmh = p.getProperty("maxV").toDouble(),
                 maxHKmh = p.getProperty("maxH").toDouble(),
+                minLat = p.getProperty("minLat")?.toDoubleOrNull(),
+                maxLat = p.getProperty("maxLat")?.toDoubleOrNull(),
+                minLon = p.getProperty("minLon")?.toDoubleOrNull(),
+                maxLon = p.getProperty("maxLon")?.toDoubleOrNull(),
             )
         } catch (_: Exception) {
             null
@@ -445,6 +466,10 @@ object TrackStore {
         meta.freefallS?.let { p["freefall"] = it.toString() }
         p["maxV"] = meta.maxVKmh.toString()
         p["maxH"] = meta.maxHKmh.toString()
+        meta.minLat?.let { p["minLat"] = it.toString() }
+        meta.maxLat?.let { p["maxLat"] = it.toString() }
+        meta.minLon?.let { p["minLon"] = it.toString() }
+        meta.maxLon?.let { p["maxLon"] = it.toString() }
         metaFile(file).outputStream().use { p.store(it, null) }
     }
 

@@ -37,7 +37,7 @@ import kotlin.math.sinh
 /**
  * Map with OpenStreetMap tiles, tracks, and an optional target pin.
  *
- * The view keeps the tiles in memory and in the cache folder of the app.
+ * The view keeps the tiles in memory and in [TileCache].
  * One finger moves the map. Two fingers zoom. A double tap zooms in.
  * If [onPick] is set, a tap moves the pin and calls it.
  */
@@ -65,7 +65,6 @@ class TrackMapView(context: Context) : View(context) {
 
     private val density = resources.displayMetrics.density
     private val handler = Handler(Looper.getMainLooper())
-    private val tileDir = File(context.cacheDir, "tiles")
     private val pending = mutableSetOf<String>()
     private val failed = mutableSetOf<String>()
 
@@ -321,28 +320,8 @@ class TrackMapView(context: Context) : View(context) {
         return null
     }
 
-    private fun loadTile(z: Int, x: Int, y: Int): Bitmap? {
-        val file = File(tileDir, "$z/$x/$y.png")
-        if (file.exists() && System.currentTimeMillis() - file.lastModified() < CACHE_MAX_AGE_MS) {
-            BitmapFactory.decodeFile(file.path)?.let { return it }
-        }
-        val connection = URL("https://tile.openstreetmap.org/$z/$x/$y.png").openConnection() as HttpURLConnection
-        connection.setRequestProperty("User-Agent", USER_AGENT)
-        connection.connectTimeout = 10_000
-        connection.readTimeout = 10_000
-        try {
-            if (connection.responseCode != 200) {
-                // Without network, use an old tile if there is one
-                return if (file.exists()) BitmapFactory.decodeFile(file.path) else null
-            }
-            val bytes = connection.inputStream.use { it.readBytes() }
-            file.parentFile?.mkdirs()
-            file.writeBytes(bytes)
-            return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } finally {
-            connection.disconnect()
-        }
-    }
+    private fun loadTile(z: Int, x: Int, y: Int): Bitmap? =
+        TileCache.bitmap(context, "osm/$z/$x/$y.png", "https://tile.openstreetmap.org/$z/$x/$y.png")
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
@@ -407,10 +386,8 @@ class TrackMapView(context: Context) : View(context) {
         private const val MIN_ZOOM = 1.0
         private const val MAX_ZOOM = 20.0
         private const val MAX_TILE_ZOOM = 19
-        private const val CACHE_MAX_AGE_MS = 30L * 24 * 3600 * 1000
 
         /** The OpenStreetMap tile policy requires a User-Agent that identifies the app. */
-        private const val USER_AGENT = "FlySightTest/0.1 (Android; private test app for FlySight 2)"
 
         /** The map is light in both themes, so it uses the light track colours. */
         fun colorOf(track: Int) = Ui.TRACK_COLORS_LIGHT[track % Ui.TRACK_COLORS_LIGHT.size]
