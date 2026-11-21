@@ -40,6 +40,25 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         updateCard()
     }
     private val tools = ui.column()
+    private val phoneStatus = ui.text(Ui.Type.BODY_MEDIUM, "", ui.onSecondaryContainer)
+    private val phoneTime = ui.text(Ui.Type.DISPLAY_SMALL, "", ui.onSecondaryContainer).apply { gravity = Gravity.END }
+    private val phoneTimeLabel = ui.text(Ui.Type.LABEL_MEDIUM, "Recording", ui.onSecondaryContainer).apply { gravity = Gravity.END }
+    /** Play starts a recording with the GPS of the phone. Stop saves it. */
+    private val phoneButton = android.widget.ImageView(main).apply {
+        scaleType = android.widget.ImageView.ScaleType.CENTER
+        imageTintList = android.content.res.ColorStateList.valueOf(ui.secondaryContainer)
+        background = ui.ripple(ui.secondaryContainer, ui.shape(ui.onSecondaryContainer, 28f), 28f)
+        setOnClickListener { togglePhone() }
+    }
+    /** True from the push of stop until the recording is saved. */
+    private var phoneStopping = false
+    private val phoneTick = object : Runnable {
+        override fun run() {
+            updatePhone()
+            if (PhoneRecorder.running) main.handler.postDelayed(this, 1000)
+        }
+    }
+    private val phoneListener: () -> Unit = { onPhoneChanged() }
     private var elevation: GroundElevation? = null
     private var remoteTried = false
     private var shownRemote: List<JumpSync.Session>? = null
@@ -71,10 +90,26 @@ class HomeScreen(main: MainActivity) : Screen(main) {
             addView(progressText, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = ui.dp(6) })
             addView(buttons, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = ui.dp(12) })
         }
+        val phoneTop = LinearLayout(main).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(phoneButton, LinearLayout.LayoutParams(ui.dp(56), ui.dp(56)).apply { marginEnd = ui.dp(16) })
+            addView(ui.column().apply {
+                addView(ui.text(Ui.Type.TITLE_LARGE, "This phone", ui.onSecondaryContainer))
+                addView(phoneStatus)
+            }, LinearLayout.LayoutParams(0, WRAP, 1f))
+            addView(ui.column().apply {
+                gravity = Gravity.END
+                addView(phoneTime)
+                addView(phoneTimeLabel)
+            })
+        }
+        val phoneCard = ui.card(ui.secondaryContainer, 16f, 20).apply { addView(phoneTop) }
         val body = ui.column().apply {
             setPadding(0, ui.dp(8), 0, ui.dp(24))
             addView(card, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(ui.dp(16), 0, ui.dp(16), ui.dp(8)) })
             addView(tools)
+            addView(phoneCard, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(8)) })
             addView(jumps)
         }
         view = ui.column().apply {
@@ -85,6 +120,72 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         tools.addView(ui.ListItem("Ground level", "Set the zero for alarms and altitude calls",
             ui.avatar(R.drawable.ic_s_altitude), ui.icon(R.drawable.ic_chevron_right)).onClick { setGroundElevation() })
         updateCard()
+        updatePhone()
+        if (!PhoneRecorder.running) {
+            Thread {
+                val recovered = runCatching { PhoneRecorder.recover(main.applicationContext) }.getOrNull()
+                if (recovered?.file != null) main.runOnUiThread {
+                    updateJumps()
+                    main.snack("Saved a phone recording that did not stop correctly.")
+                }
+            }.start()
+        }
+    }
+
+    // ---- Phone recording ----
+
+    private fun togglePhone() {
+        if (phoneStopping) return
+        if (PhoneRecorder.running) {
+            phoneStopping = true
+            PhoneRecorder.stop(main)
+            updatePhone()
+        } else {
+            main.withLocation {
+                PhoneRecorder.start(main)
+                main.handler.removeCallbacks(phoneTick)
+                main.handler.post(phoneTick)
+            }
+        }
+    }
+
+    private fun onPhoneChanged() {
+        if (!PhoneRecorder.running) phoneStopping = false
+        updatePhone()
+        val result = PhoneRecorder.result ?: return
+        PhoneRecorder.result = null
+        val file = result.file
+        if (file != null) {
+            updateJumps()
+            main.snack("Saved the phone recording.", "Show") { TrackActivity.open(main, file) }
+        } else {
+            main.snack(result.error ?: "Cannot save the recording.", long = true)
+        }
+    }
+
+    private fun updatePhone() {
+        val running = PhoneRecorder.running
+        phoneButton.setImageResource(if (running) R.drawable.ic_stop else R.drawable.ic_play)
+        val label = if (running) "Stop and save the recording" else "Record a jump with the phone GPS"
+        phoneButton.contentDescription = label
+        phoneButton.tooltipText = label
+        phoneButton.isEnabled = !phoneStopping
+        phoneButton.alpha = if (phoneStopping) 0.38f else 1f
+        val acc = PhoneRecorder.accuracy
+        phoneStatus.text = when {
+            phoneStopping -> "Saving…"
+            !running -> "GPS only · Tap play to record a jump"
+            PhoneRecorder.fixCount == 0 -> "Waiting for GPS…"
+            else -> listOfNotNull("${PhoneRecorder.satelliteCount} satellites",
+                acc?.let { "±${Math.round(it)} m" }).joinToString(" · ")
+        }
+        phoneTime.visibility = if (running) View.VISIBLE else View.GONE
+        phoneTimeLabel.visibility = phoneTime.visibility
+        if (running) {
+            val s = (android.os.SystemClock.elapsedRealtime() - PhoneRecorder.startedAt) / 1000
+            phoneTime.text = if (s >= 3600) String.format(Locale.US, "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+            else String.format(Locale.US, "%d:%02d", s / 60, s % 60)
+        }
     }
 
     /**
@@ -157,6 +258,10 @@ class HomeScreen(main: MainActivity) : Screen(main) {
     }
 
     override fun onShow() {
+        PhoneRecorder.listeners.add(phoneListener)
+        onPhoneChanged()
+        main.handler.removeCallbacks(phoneTick)
+        if (PhoneRecorder.running) main.handler.post(phoneTick)
         updateCard()
         updateJumps()
         findRemote()
@@ -184,6 +289,8 @@ class HomeScreen(main: MainActivity) : Screen(main) {
     }
 
     override fun onHide() {
+        PhoneRecorder.listeners.remove(phoneListener)
+        main.handler.removeCallbacks(phoneTick)
         elevation?.dismiss()
     }
 
@@ -367,6 +474,7 @@ class HomeScreen(main: MainActivity) : Screen(main) {
             val session = jump.session
             val item = if (file != null) {
                 val where = when {
+                    TrackStore.isPhone(file) -> "Recorded with this phone"
                     remote == null -> null
                     session != null -> "On the phone and the FlySight"
                     TrackStore.isSession(file) -> "On the phone only"

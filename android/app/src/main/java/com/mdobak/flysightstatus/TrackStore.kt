@@ -113,6 +113,10 @@ object TrackStore {
     private var trackOwners: SharedPreferences? = null
     private var deviceOwners: SharedPreferences? = null
 
+    /** The device ID of this phone in its recordings ([PhoneRecorder]). Each install has a new random ID. */
+    var phoneDeviceId = ""
+        private set
+
     /** Call this before the names are used. */
     fun init(context: Context) {
         if (names != null) return
@@ -121,6 +125,10 @@ object TrackStore {
         trackOwners = app.getSharedPreferences("track_owners", Context.MODE_PRIVATE)
         val devices = app.getSharedPreferences("device_owners", Context.MODE_PRIVATE)
         deviceOwners = devices
+        val phone = app.getSharedPreferences("phone", Context.MODE_PRIVATE)
+        phoneDeviceId = phone.getString("deviceId", null) ?: PhoneRecorder.newDeviceId().also {
+            phone.edit().putString("deviceId", it).apply()
+        }
         // Version 1 kept only the owners of the FlySights. Give their names to the saved tracks one time.
         if (!devices.getBoolean(OWNERS_V2, false)) {
             if (devices.all.size > 0) for (f in list(app)) addDefaultOwner(f)
@@ -187,6 +195,42 @@ object TrackStore {
         return saveParsed(context, name, data, track)
     }
 
+    /**
+     * Move a recording of the phone to the saved tracks: "phone_yy-MM-dd_HH-mm-ss.csv"
+     * from the time of the first fix. The barometer file [sensor] goes to sensors/.
+     * Call on a background thread.
+     */
+    fun addRecording(context: Context, track: File, sensor: File?, firstMs: Long): File {
+        val base = "phone_" + KEY.format(Instant.ofEpochMilli(firstMs))
+        var name = "$base.csv"
+        var n = 2
+        while (File(dir(context), name).exists()) name = "${base}_${n++}.csv"
+        val file = File(dir(context), name)
+        if (!track.renameTo(file)) {
+            track.copyTo(file)
+            track.delete()
+        }
+        if (sensor != null) {
+            val target = sensorFile(file)
+            target.parentFile?.mkdirs()
+            if (!sensor.renameTo(target)) {
+                sensor.copyTo(target, overwrite = true)
+                sensor.delete()
+            }
+        }
+        metaFile(file).delete()
+        metaCache.remove(file.path)
+        headerCache.remove(file.path)
+        addDefaultOwner(file)
+        return file
+    }
+
+    /** The barometer data (SENSOR.CSV format) of a phone recording. The file can be missing. */
+    fun sensorFile(file: File) = File(File(file.parentFile?.parentFile, "sensors"), file.name)
+
+    /** True for a track that this phone recorded. */
+    fun isPhone(file: File) = phoneDeviceId.isNotEmpty() && deviceId(file) == phoneDeviceId
+
     /** The saved track of the same recording, or null. */
     fun findSame(context: Context, header: TrackHeader): File? = list(context).firstOrNull { f ->
         val h = header(f)
@@ -200,6 +244,7 @@ object TrackStore {
 
     fun delete(file: File) {
         file.delete()
+        sensorFile(file).delete()
         metaFile(file).delete()
         metaCache.remove(file.path)
         headerCache.remove(file.path)
@@ -309,6 +354,7 @@ object TrackStore {
     fun who(file: File, ownDevices: Set<String>): String? {
         owner(file)?.let { return it }
         val id = deviceId(file) ?: return null
+        if (id == phoneDeviceId) return null
         return if (!isSession(file) && id !in ownDevices) "Received" else null
     }
 

@@ -401,8 +401,37 @@ class MainActivity : Activity(), FlySightConnection.Listener {
         action()
     }
 
+    /** What to do after the user gives the location permission. */
+    private var afterLocation: (() -> Unit)? = null
+
+    /** Run [action] when the location is on and the app has the precise location permission. */
+    fun withLocation(action: () -> Unit) {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            afterLocation = action
+            requestPermissions(LOCATION_PERMISSIONS, REQUEST_LOCATION)
+            return
+        }
+        val lm = getSystemService(android.location.LocationManager::class.java)
+        if (lm == null || !lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)) {
+            snack("Turn on the location, then try again.", long = true)
+            startActivity(Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            return
+        }
+        action()
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_LOCATION) {
+            val action = afterLocation
+            afterLocation = null
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                action?.let { withLocation(it) }
+            } else {
+                snack("The app needs the precise location permission to record with the phone GPS.", long = true)
+            }
+            return
+        }
         if (requestCode != REQUEST_PERMISSIONS) return
         val action = afterPermissions
         afterPermissions = null
@@ -782,6 +811,7 @@ class MainActivity : Activity(), FlySightConnection.Listener {
 
     companion object {
         private const val REQUEST_PERMISSIONS = 1
+        private const val REQUEST_LOCATION = 2
         const val REQUEST_UPLOAD = 10
         const val REQUEST_SAVE = 11
         const val REQUEST_FIRMWARE = 12
@@ -817,6 +847,8 @@ class MainActivity : Activity(), FlySightConnection.Listener {
 
         private val STREAMS = setOf(P.SD_GNSS_MEASUREMENT, P.SD_SENSOR_MEASUREMENT)
 
+        private val LOCATION_PERMISSIONS = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.POST_NOTIFICATIONS)
         private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
 
         fun ByteArray.asText() = toString(Charsets.ISO_8859_1).trimEnd('\u0000')
