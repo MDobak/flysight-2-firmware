@@ -108,8 +108,8 @@ class HomeScreen(main: MainActivity) : Screen(main) {
         val body = ui.column().apply {
             setPadding(0, ui.dp(8), 0, ui.dp(24))
             addView(card, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(ui.dp(16), 0, ui.dp(16), ui.dp(8)) })
-            addView(tools)
             addView(phoneCard, LinearLayout.LayoutParams(MATCH, WRAP).apply { setMargins(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(8)) })
+            addView(tools)
             addView(jumps)
         }
         view = ui.column().apply {
